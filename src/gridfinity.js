@@ -538,68 +538,52 @@ function capLoop(mesh, loop2d, z) {
     mesh.tri([t[0][0], t[0][1], z], [t[1][0], t[1][1], z], [t[2][0], t[2][1], z]);
 }
 
-// Curved "finger" outline: a capsule swept along a circular arc (centre of
-// curvature at C, centreline radius R, half-width hw, base direction `dir`,
-// half-sweep `alpha`), with rounded ends. Used so the two pinch wells curve
-// toward each other like a pinching thumb + finger. `cw` picks the winding.
-function fingerLoop(Cx, Cy, R, hw, dir, alpha, cw, arcSeg, capSeg) {
-  arcSeg = arcSeg ?? 14; capSeg = capSeg ?? 6;
-  const pts = [];
-  const at = (rad, phi) => [Cx + rad * Math.cos(phi), Cy + rad * Math.sin(phi)];
-  for (let i = 0; i <= arcSeg; i++)                       // outer arc
-    pts.push(at(R + hw, dir - alpha + 2 * alpha * i / arcSeg));
-  { const phe = dir + alpha, cxp = Cx + R*Math.cos(phe), cyp = Cy + R*Math.sin(phe);
-    const rx = Math.cos(phe), ry = Math.sin(phe), tx = -Math.sin(phe), ty = Math.cos(phe);
-    for (let j = 1; j <= capSeg - 1; j++) { const th = Math.PI * j / capSeg;
-      pts.push([cxp + hw*(Math.cos(th)*rx + Math.sin(th)*tx),
-                cyp + hw*(Math.cos(th)*ry + Math.sin(th)*ty)]); } }
-  for (let i = 0; i <= arcSeg; i++)                       // inner arc (reverse)
-    pts.push(at(R - hw, dir + alpha - 2 * alpha * i / arcSeg));
-  { const phs = dir - alpha, cxp = Cx + R*Math.cos(phs), cyp = Cy + R*Math.sin(phs);
-    const rx = Math.cos(phs), ry = Math.sin(phs), tx = -Math.sin(phs), ty = Math.cos(phs);
-    for (let j = 1; j <= capSeg - 1; j++) { const th = Math.PI * j / capSeg;
-      pts.push([cxp + hw*(-Math.cos(th)*rx - Math.sin(th)*tx),
-                cyp + hw*(-Math.cos(th)*ry - Math.sin(th)*ty)]); } }
-  const ccw = area2(pts) > 0;
-  if (cw === ccw) pts.reverse();
-  return pts;
-}
-
-// Recessed two-finger pinch grip: two curved finger wells pressed DOWN into the
-// lid top (toward the inside of the bin), curving toward each other like a
-// pinch. Nothing stands above the lid. Returns the openings to cut in the lid
-// top (`holes`) and the thin-walled cup solids forming the wells (`cups`).
-// `topZ` is the local Z of the surface the fingers enter; wells reach `depth`
-// below it. centreHX/centreHY bound the flat central area available.
+// Recessed two-finger pinch grip: two elliptical wells in the lid top whose
+// FLOOR is curved along Z. Across each ellipse the depth sweeps a quarter
+// circle — ~0 mm at the outer (far) edge, deepest (`depth`, ~15 mm) at the inner
+// edge facing the other finger — so a fingertip slides in shallow and curls down
+// to pinch the central web. Nothing protrudes above the lid. Returns the
+// openings to cut in the lid top (`holes`) and the watertight cup solids (`cups`)
+// that form the wells and seal the lid. centreHX/centreHY bound the flat area.
 function pinchWells(centreHX, centreHY, topZ, depth, seg) {
+  const N = Math.max(40, seg * 5);     // ellipse samples (smooth scoop)
   const tw = 1.6, floorTh = 1.5;
-  const arcSeg = Math.max(12, seg * 2), capSeg = 6;
-  const hw = Math.max(2.6, Math.min(4, centreHY * 0.20));   // finger half-width
-  const Lh = Math.max(5, Math.min(centreHY * 0.56, 13));    // half finger length
-  const R  = Math.max(Lh + 3, 16);                          // gentle curvature
-  const alpha = Math.asin(Math.min(0.8, Lh / R));
-  const sag = R * (1 - Math.cos(alpha));                    // inward tip curl
   const gap = Math.max(4, Math.min(7, centreHX * 0.18));    // central web
-  let xF = gap / 2 + sag + hw;
-  const maxXF = centreHX - hw - 0.8;
-  if (xF > maxXF) xF = Math.max(hw + 0.5, maxXF);
-  const Cx = xF - R;                                        // right-finger curvature centre
-  const zWell = topZ - depth, zCup = zWell - floorTh;
+  // The depth gradient is a true quarter circle, so its radius R equals both the
+  // max depth and the ellipse's full length along X (R = 2*ax). Fit R to the
+  // available depth and the available width.
+  let R = Math.min(depth, centreHX - gap / 2 - tw - 0.8);
+  R = Math.max(5, R);
+  const ax = R / 2;                                          // half-length along X
+  const ay = Math.max(4, Math.min(R * 0.6, centreHY - tw - 0.8)); // half-width along Y
+  const d  = ax + gap / 2;                                   // centre offset of each ellipse
   const holes = [], cups = [];
   for (const side of [1, -1]) {
-    const dir = side === 1 ? 0 : Math.PI;
-    const ccx = side === 1 ? Cx : -Cx;
-    holes.push(fingerLoop(ccx, 0, R, hw + 0.3, dir, alpha, true, arcSeg, capSeg));
-    const inTop  = fingerLoop(ccx, 0, R, hw,      dir, alpha, false, arcSeg, capSeg);
-    const outTop = fingerLoop(ccx, 0, R, hw + tw, dir, alpha, false, arcSeg, capSeg);
-    const inT = to3(inTop, topZ), inB = to3(inTop, zWell);
-    const outT = to3(outTop, topZ), outB = to3(outTop, zCup);
+    const cx = side * d;
+    const farX = cx + side * ax;        // shallow (0) edge, on the OUTER side
+    // floor height at x: quarter circle, depth 0 at farX -> R at the inner edge
+    const zf = (x) => {
+      let dep = R - Math.sqrt(Math.max(0, R * R - (x - farX) * (x - farX)));
+      dep = Math.min(R, Math.max(0.15, dep));   // tiny min so the rim isn't degenerate
+      return topZ - dep;
+    };
+    holes.push(ellipseLoop(cx, 0, ax + 0.3, ay + 0.3, N, true));   // cut in the lid top
     const m = new Mesh();
-    ring(m, inT, outT, false);    // rim, flush with the lid top
-    ring(m, outT, outB, false);   // outer wall (embeds in plate, hangs below)
-    capLoop(m, outTop, zCup);     // closed cup bottom
-    ring(m, inB, inT, false);     // inner wall = the finger-well surface
-    capLoop(m, inTop, zWell);     // finger-well floor
+    const innerXY = ellipseLoop(cx, 0, ax, ay, N, false);          // well rim footprint
+    const outerXY = ellipseLoop(cx, 0, ax + tw, ay + tw, N, false);// cup outer footprint
+    const IR = innerXY.map(p => [p[0], p[1], topZ]);               // inner rim (flush top)
+    const IF = innerXY.map(p => [p[0], p[1], zf(p[0])]);           // inner floor edge (curved)
+    const OR = outerXY.map(p => [p[0], p[1], topZ]);               // outer rim
+    const zBottom = topZ - R - floorTh;
+    const OB = outerXY.map(p => [p[0], p[1], zBottom]);            // flat underside edge
+    ring(m, IR, OR, false);          // flat rim annulus, flush with the lid top
+    ring(m, OR, OB, false);          // outer wall (embeds into the plate, hangs below)
+    capLoop(m, outerXY, zBottom);    // flat closed underside
+    ring(m, IR, IF, false);          // inner curtain: rim down to the curved floor
+    for (const t of triangulateWithHoles(innerXY, []))            // curved scoop floor
+      m.tri([t[0][0], t[0][1], zf(t[0][0])],
+            [t[1][0], t[1][1], zf(t[1][0])],
+            [t[2][0], t[2][1], zf(t[2][0])]);
     cups.push(m.solid());
   }
   return { holes, cups };
