@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GRIDFORGE · parametric bin generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c1116; --bg2:#0f161d; --panel:#121b23; --panel2:#0e151b;
+    --line:#1e2b35; --line2:#2a3b48;
+    --ink:#e8eef3; --ink-dim:#8aa0b0; --ink-faint:#5b7081;
+    --amber:#ff7a2f; --amber-soft:#ffae6b; --cyan:#6fd6ff;
+    --good:#7ee0a8;
+    --r:10px; --shadow:0 18px 50px -22px rgba(0,0,0,.85);
+    --fdisp:'Syne',sans-serif; --fbody:'Archivo',system-ui,sans-serif; --fmono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:var(--fbody); color:var(--ink);
+    background:
+      radial-gradient(1200px 700px at 78% -10%, #15212b 0%, transparent 55%),
+      radial-gradient(900px 600px at -5% 110%, #16110c 0%, transparent 50%),
+      linear-gradient(var(--bg),var(--bg));
+    overflow:hidden;
+  }
+  /* faint engineering grid wash over everything */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0; opacity:.5;
+    background-image:
+      linear-gradient(rgba(110,214,255,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(110,214,255,.045) 1px,transparent 1px);
+    background-size:34px 34px;
+    mask-image:radial-gradient(circle at 50% 40%,#000 35%,transparent 90%);
+  }
+  .app{position:relative; z-index:1; height:100vh; display:grid; grid-template-rows:auto 1fr;}
+
+  /* ---------- header ---------- */
+  header{
+    display:flex; align-items:baseline; gap:18px; padding:16px 26px;
+    border-bottom:1px solid var(--line); background:linear-gradient(180deg,rgba(18,27,35,.9),rgba(12,17,22,.4));
+    backdrop-filter:blur(6px);
+  }
+  .brand{font-family:var(--fdisp); font-weight:800; font-size:26px; letter-spacing:.5px; line-height:1;}
+  .brand b{color:var(--amber)}
+  .brand .slash{color:var(--line2); margin:0 2px}
+  .tagline{font-family:var(--fmono); font-size:11.5px; color:var(--ink-faint); letter-spacing:.18em; text-transform:uppercase;}
+  .spec{margin-left:auto; font-family:var(--fmono); font-size:11px; color:var(--ink-faint); letter-spacing:.12em;}
+  .spec b{color:var(--cyan); font-weight:500}
+
+  /* ---------- layout ---------- */
+  main{display:grid; grid-template-columns:340px 1fr; min-height:0;}
+  .console{
+    border-right:1px solid var(--line); background:linear-gradient(180deg,var(--panel),var(--panel2));
+    overflow-y:auto; padding:18px 18px 80px;
+  }
+  .console::-webkit-scrollbar{width:9px}
+  .console::-webkit-scrollbar-thumb{background:var(--line2); border-radius:9px}
+  .stage{position:relative; min-height:0;}
+  #viewport{position:absolute; inset:0;}
+  #viewport canvas{display:block; width:100%; height:100%}
+
+  /* corner ticks on the stage, like a drafting frame */
+  .stage::after{
+    content:""; position:absolute; inset:14px; pointer-events:none; border:1px solid var(--line);
+    -webkit-mask:
+      linear-gradient(#000,#000) top left/26px 1px no-repeat,
+      linear-gradient(#000,#000) top left/1px 26px no-repeat,
+      linear-gradient(#000,#000) top right/26px 1px no-repeat,
+      linear-gradient(#000,#000) top right/1px 26px no-repeat,
+      linear-gradient(#000,#000) bottom left/26px 1px no-repeat,
+      linear-gradient(#000,#000) bottom left/1px 26px no-repeat,
+      linear-gradient(#000,#000) bottom right/26px 1px no-repeat,
+      linear-gradient(#000,#000) bottom right/1px 26px no-repeat;
+  }
+  .stage-label{
+    position:absolute; left:22px; bottom:18px; font-family:var(--fmono);
+    font-size:11px; color:var(--ink-faint); letter-spacing:.16em; text-transform:uppercase;
+    background:rgba(12,17,22,.55); padding:5px 9px; border:1px solid var(--line); border-radius:6px;
+  }
+  .viewbtns{position:absolute; right:22px; top:22px; display:flex; gap:8px;}
+  .viewbtns button{
+    font-family:var(--fmono); font-size:11px; letter-spacing:.08em; color:var(--ink-dim);
+    background:rgba(14,21,27,.7); border:1px solid var(--line2); padding:7px 11px; border-radius:7px; cursor:pointer;
+    transition:.15s;
+  }
+  .viewbtns button:hover{color:var(--ink); border-color:var(--amber); box-shadow:0 0 0 1px var(--amber) inset}
+
+  /* ---------- control groups ---------- */
+  .group{margin-bottom:18px; opacity:0; transform:translateY(8px); animation:rise .5s cubic-bezier(.2,.7,.2,1) forwards;}
+  .group:nth-child(1){animation-delay:.03s}.group:nth-child(2){animation-delay:.08s}
+  .group:nth-child(3){animation-delay:.13s}.group:nth-child(4){animation-delay:.18s}
+  .group:nth-child(5){animation-delay:.23s}.group:nth-child(6){animation-delay:.28s}
+  .group:nth-child(7){animation-delay:.33s}.group:nth-child(8){animation-delay:.38s}
+  @keyframes rise{to{opacity:1;transform:none}}
+
+  .ghead{
+    display:flex; align-items:center; gap:9px; margin:0 0 11px;
+    font-family:var(--fmono); font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-dim);
+  }
+  .ghead .num{color:var(--amber); font-weight:700}
+  .ghead::after{content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--line2),transparent)}
+  .ghead.feat{color:var(--amber-soft)}
+  .ghead.feat .num{color:var(--cyan)}
+  .feature-tag{font-size:9px; letter-spacing:.14em; color:var(--cyan); border:1px solid var(--line2); padding:2px 6px; border-radius:20px;}
+
+  .row{display:grid; grid-template-columns:1fr auto; align-items:center; gap:8px; margin:9px 0 3px;}
+  .row label{font-size:12.5px; color:var(--ink-dim)}
+  .row .val{font-family:var(--fmono); font-size:12px; color:var(--ink); min-width:42px; text-align:right;}
+  .row .val .u{color:var(--ink-faint); font-size:10px; margin-left:2px}
+  input[type=range]{
+    grid-column:1/-1; -webkit-appearance:none; appearance:none; height:4px; border-radius:4px;
+    background:linear-gradient(90deg,var(--amber) 0%,var(--line2) 0%); background:var(--line2); cursor:pointer; margin:2px 0 6px;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:15px; height:15px; border-radius:50%;
+    background:var(--amber); border:2px solid #1a120b; box-shadow:0 0 0 1px var(--amber);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:15px;height:15px;border:2px solid #1a120b;border-radius:50%;background:var(--amber);box-shadow:0 0 0 1px var(--amber)}
+
+  .pair{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+
+  .toggle{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 8px;
+    padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:rgba(255,255,255,.012)}
+  .toggle span{font-size:12.5px; color:var(--ink-dim)}
+  .switch{position:relative; width:40px; height:22px; flex:none}
+  .switch input{opacity:0; width:0; height:0}
+  .slider{position:absolute; inset:0; background:var(--line2); border-radius:22px; transition:.18s; cursor:pointer}
+  .slider::before{content:""; position:absolute; height:16px; width:16px; left:3px; top:3px; background:#cdd9e1; border-radius:50%; transition:.18s}
+  .switch input:checked + .slider{background:var(--amber)}
+  .switch input:checked + .slider::before{transform:translateX(18px); background:#1a120b}
+
+  .btns{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:6px}
+  .btn{font-family:var(--fmono); font-size:12px; letter-spacing:.06em; padding:12px 10px; border-radius:9px; cursor:pointer; transition:.15s; border:1px solid var(--line2); color:var(--ink); background:rgba(255,255,255,.02)}
+  .btn:hover{border-color:var(--cyan); color:#fff}
+  .btn.primary{background:linear-gradient(180deg,var(--amber),#e0641c); border-color:#ffae6b; color:#1a0f06; font-weight:700}
+  .btn.primary:hover{box-shadow:var(--shadow)}
+
+  .readout{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:16px;}
+  .stat{border:1px solid var(--line); border-radius:9px; padding:10px; background:rgba(111,214,255,.03)}
+  .stat .k{font-family:var(--fmono); font-size:9.5px; letter-spacing:.16em; color:var(--ink-faint); text-transform:uppercase}
+  .stat .v{font-family:var(--fmono); font-size:17px; color:var(--cyan); margin-top:3px}
+  .stat .v small{font-size:10px; color:var(--ink-faint)}
+
+  .hint{font-size:11px; color:var(--ink-faint); line-height:1.5; margin:6px 2px 0}
+
+  #toast{position:fixed; left:50%; bottom:34px; transform:translate(-50%,20px); opacity:0;
+    background:#1a242d; border:1px solid var(--amber); color:var(--ink); font-family:var(--fmono); font-size:12px;
+    padding:10px 16px; border-radius:8px; transition:.25s; pointer-events:none; z-index:20}
+  #toast.show{opacity:1; transform:translate(-50%,0)}
+
+  #gf-err{position:absolute; inset:14px; display:flex; flex-direction:column; gap:12px;
+    align-items:flex-start; justify-content:center; padding:34px; z-index:30;
+    background:linear-gradient(180deg,rgba(12,17,22,.92),rgba(12,17,22,.96));
+    border:1px solid var(--amber); border-radius:10px; color:var(--ink);}
+  #gf-err h3{font-family:var(--fdisp); margin:0; font-size:20px; color:var(--amber)}
+  #gf-err p{margin:0; max-width:560px; line-height:1.55; color:var(--ink-dim); font-size:13.5px}
+  #gf-err code{font-family:var(--fmono); color:var(--cyan); background:rgba(111,214,255,.08); padding:2px 6px; border-radius:5px}
+  #gf-err pre{font-family:var(--fmono); font-size:11.5px; color:var(--ink-faint); white-space:pre-wrap;
+    background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:8px; padding:12px; max-width:560px; margin:4px 0 0; overflow:auto}
+
+  @media (max-width:880px){
+    main{grid-template-columns:1fr; grid-template-rows:1fr auto}
+    .console{order:2; border-right:0; border-top:1px solid var(--line); max-height:48vh}
+    .stage{order:1; min-height:46vh}
+    header{flex-wrap:wrap; gap:6px 18px}
+    .spec{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><b>GRID</b>FORGE</div>
+    <div class="tagline">parametric bin generator</div>
+    <div class="spec">grid <b>42mm</b> · unit <b>7mm</b> · base <b>4.75mm</b></div>
+  </header>
+
+  <main>
+    <!-- ============ CONSOLE ============ -->
+    <section class="console">
+      <div class="readout">
+        <div class="stat"><div class="k">Width</div><div class="v"><span id="dimW">—</span><small>mm</small></div></div>
+        <div class="stat"><div class="k">Depth</div><div class="v"><span id="dimD">—</span><small>mm</small></div></div>
+        <div class="stat"><div class="k">Height</div><div class="v"><span id="dimH">—</span><small>mm</small></div></div>
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">01</span> Footprint</p>
+        <div class="pair">
+          <div>
+            <div class="row"><label>Grid X</label><span class="val" data-out="gx"></span></div>
+            <input id="gx" type="range" min="1" max="8" step="1" value="2">
+          </div>
+          <div>
+            <div class="row"><label>Grid Y</label><span class="val" data-out="gy"></span></div>
+            <input id="gy" type="range" min="1" max="8" step="1" value="1">
+          </div>
+        </div>
+        <div class="row"><label>Height units (×7mm)</label><span class="val" data-out="heightUnits"></span></div>
+        <input id="heightUnits" type="range" min="2" max="20" step="1" value="6">
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">02</span> Walls &amp; floor</p>
+        <div class="row"><label>Wall thickness</label><span class="val"><span data-out="wall"></span><span class="u">mm</span></span></div>
+        <input id="wall" type="range" min="0.8" max="3" step="0.1" value="1.2">
+        <div class="row"><label>Floor thickness</label><span class="val"><span data-out="floor"></span><span class="u">mm</span></span></div>
+        <input id="floor" type="range" min="0.4" max="6" step="0.1" value="1.2">
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">03</span> Compartments</p>
+        <div class="pair">
+          <div>
+            <div class="row"><label>Columns</label><span class="val" data-out="divX"></span></div>
+            <input id="divX" type="range" min="1" max="8" step="1" value="1">
+          </div>
+          <div>
+            <div class="row"><label>Rows</label><span class="val" data-out="divY"></span></div>
+            <input id="divY" type="range" min="1" max="8" step="1" value="1">
+          </div>
+        </div>
+        <div class="row"><label>Divider thickness</label><span class="val"><span data-out="dividerThickness"></span><span class="u">mm</span></span></div>
+        <input id="dividerThickness" type="range" min="0.8" max="3" step="0.1" value="1.2">
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">04</span> Mounting holes</p>
+        <div class="toggle"><span>Magnet / screw holes</span>
+          <label class="switch"><input id="holesEnabled" type="checkbox"><span class="slider"></span></label>
+        </div>
+        <div class="row"><label>Diameter</label><span class="val"><span data-out="holeDiameter"></span><span class="u">mm</span></span></div>
+        <input id="holeDiameter" type="range" min="2" max="8" step="0.1" value="6">
+        <div class="row"><label>Depth</label><span class="val"><span data-out="holeDepth"></span><span class="u">mm</span></span></div>
+        <input id="holeDepth" type="range" min="1" max="4" step="0.1" value="2">
+      </div>
+
+      <div class="group">
+        <p class="ghead feat"><span class="num">05</span> Reinforcement indents <span class="feature-tag">STRENGTH</span></p>
+        <div class="row"><label>Count along height</label><span class="val" data-out="indentCount"></span></div>
+        <input id="indentCount" type="range" min="0" max="5" step="1" value="1">
+        <div class="row"><label>Depth</label><span class="val"><span data-out="indentDepth"></span><span class="u">mm</span></span></div>
+        <input id="indentDepth" type="range" min="0.2" max="1.5" step="0.1" value="0.6">
+        <div class="row"><label>Width (band)</label><span class="val"><span data-out="indentWidth"></span><span class="u">mm</span></span></div>
+        <input id="indentWidth" type="range" min="1" max="6" step="0.5" value="2.5">
+        <p class="hint">Recessed grooves wrap the outer wall to stiffen tall, thin-walled bins. They stay inside the footprint so bins still sit flush against neighbours.</p>
+      </div>
+
+      <div class="group">
+        <p class="ghead feat"><span class="num">06</span> Fitted lid <span class="feature-tag">ADD-ON</span></p>
+        <div class="toggle"><span>Generate matching lid</span>
+          <label class="switch"><input id="lidEnabled" type="checkbox" checked><span class="slider"></span></label>
+        </div>
+        <div class="row"><label>Fit clearance</label><span class="val"><span data-out="lidClearance"></span><span class="u">mm</span></span></div>
+        <input id="lidClearance" type="range" min="0.1" max="0.6" step="0.05" value="0.25">
+        <div class="pair">
+          <div>
+            <div class="row"><label>Lid wall</label><span class="val"><span data-out="lidWall"></span></span></div>
+            <input id="lidWall" type="range" min="0.8" max="3" step="0.1" value="1.6">
+          </div>
+          <div>
+            <div class="row"><label>Skirt</label><span class="val"><span data-out="lidSkirt"></span></span></div>
+            <input id="lidSkirt" type="range" min="3" max="12" step="0.5" value="6">
+          </div>
+        </div>
+        <div class="row"><label>Top thickness</label><span class="val"><span data-out="lidTop"></span><span class="u">mm</span></span></div>
+        <input id="lidTop" type="range" min="0.8" max="3" step="0.1" value="1.6">
+        <div class="toggle"><span>Show lid in view</span>
+          <label class="switch"><input id="showLid" type="checkbox" checked><span class="slider"></span></label>
+        </div>
+        <div class="toggle"><span>Exploded view</span>
+          <label class="switch"><input id="explode" type="checkbox" checked><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">07</span> Export &nbsp;·&nbsp; <span id="triCount" style="color:var(--ink-dim)">0</span> tris</p>
+        <div class="btns">
+          <button class="btn primary" id="exportBin">↓ BIN .STL</button>
+          <button class="btn" id="exportLid">↓ LID .STL</button>
+        </div>
+        <p class="hint">Solids export in print orientation (+Z up). The bin is a set of watertight solids your slicer auto-unions into one body.</p>
+      </div>
+    </section>
+
+    <!-- ============ STAGE ============ -->
+    <section class="stage">
+      <div id="viewport"></div>
+      <div class="viewbtns"><button id="resetView">RESET VIEW</button></div>
+      <div class="stage-label">drag · orbit &nbsp;|&nbsp; scroll · zoom &nbsp;|&nbsp; +Z up</div>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+
+<!-- Failure watchdog: surfaces load/runtime problems instead of a blank view -->
+<script>
+  window.__GF_OK__ = false;
+  window.__gfError = function (e) {
+    if (window.__GF_OK__) return;
+    var v = document.getElementById('viewport');
+    if (!v || document.getElementById('gf-err')) return;
+    var detail = (e && (e.stack || e.message)) ? (e.stack || e.message) : (e + '');
+    var html =
+      '<div id="gf-err">' +
+      '<h3>The 3D view didn\u2019t start</h3>' +
+      '<p>This almost always means one of two things:</p>' +
+      '<p><b>1.</b> The page was opened straight from disk (a <code>file://</code> address). ' +
+      'Browsers block module loading that way. Serve the folder over HTTP instead \u2014 in this folder run ' +
+      '<code>python3 -m http.server 8000</code> and open <code>http://localhost:8000</code>. ' +
+      '(Or just open <code>standalone.html</code>, which works by double-click.)</p>' +
+      '<p><b>2.</b> three.js couldn\u2019t load from its CDN \u2014 check your internet connection.</p>' +
+      '<pre>' + detail.replace(/[<>&]/g, function (c) { return { '<':'&lt;','>':'&gt;','&':'&amp;' }[c]; }) + '</pre>' +
+      '</div>';
+    v.insertAdjacentHTML('beforeend', html);
+  };
+  window.addEventListener('error', function (ev) {
+    if (!window.__GF_OK__) window.__gfError(ev.error || ev.message || 'A script failed to load.');
+  }, true);
+  window.addEventListener('unhandledrejection', function (ev) {
+    if (!window.__GF_OK__) window.__gfError((ev.reason && ev.reason.message) || ev.reason || 'A module failed to load.');
+  });
+  setTimeout(function () {
+    if (!window.__GF_OK__) window.__gfError('Timed out: the 3D engine never initialised.');
+  }, 3500);
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

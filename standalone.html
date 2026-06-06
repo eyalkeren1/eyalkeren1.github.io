@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GRIDFORGE (standalone) · parametric bin generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c1116; --bg2:#0f161d; --panel:#121b23; --panel2:#0e151b;
+    --line:#1e2b35; --line2:#2a3b48;
+    --ink:#e8eef3; --ink-dim:#8aa0b0; --ink-faint:#5b7081;
+    --amber:#ff7a2f; --amber-soft:#ffae6b; --cyan:#6fd6ff;
+    --good:#7ee0a8;
+    --r:10px; --shadow:0 18px 50px -22px rgba(0,0,0,.85);
+    --fdisp:'Syne',sans-serif; --fbody:'Archivo',system-ui,sans-serif; --fmono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:var(--fbody); color:var(--ink);
+    background:
+      radial-gradient(1200px 700px at 78% -10%, #15212b 0%, transparent 55%),
+      radial-gradient(900px 600px at -5% 110%, #16110c 0%, transparent 50%),
+      linear-gradient(var(--bg),var(--bg));
+    overflow:hidden;
+  }
+  /* faint engineering grid wash over everything */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0; opacity:.5;
+    background-image:
+      linear-gradient(rgba(110,214,255,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(110,214,255,.045) 1px,transparent 1px);
+    background-size:34px 34px;
+    mask-image:radial-gradient(circle at 50% 40%,#000 35%,transparent 90%);
+  }
+  .app{position:relative; z-index:1; height:100vh; display:grid; grid-template-rows:auto 1fr;}
+
+  /* ---------- header ---------- */
+  header{
+    display:flex; align-items:baseline; gap:18px; padding:16px 26px;
+    border-bottom:1px solid var(--line); background:linear-gradient(180deg,rgba(18,27,35,.9),rgba(12,17,22,.4));
+    backdrop-filter:blur(6px);
+  }
+  .brand{font-family:var(--fdisp); font-weight:800; font-size:26px; letter-spacing:.5px; line-height:1;}
+  .brand b{color:var(--amber)}
+  .brand .slash{color:var(--line2); margin:0 2px}
+  .tagline{font-family:var(--fmono); font-size:11.5px; color:var(--ink-faint); letter-spacing:.18em; text-transform:uppercase;}
+  .spec{margin-left:auto; font-family:var(--fmono); font-size:11px; color:var(--ink-faint); letter-spacing:.12em;}
+  .spec b{color:var(--cyan); font-weight:500}
+
+  /* ---------- layout ---------- */
+  main{display:grid; grid-template-columns:340px 1fr; min-height:0;}
+  .console{
+    border-right:1px solid var(--line); background:linear-gradient(180deg,var(--panel),var(--panel2));
+    overflow-y:auto; padding:18px 18px 80px;
+  }
+  .console::-webkit-scrollbar{width:9px}
+  .console::-webkit-scrollbar-thumb{background:var(--line2); border-radius:9px}
+  .stage{position:relative; min-height:0;}
+  #viewport{position:absolute; inset:0;}
+  #viewport canvas{display:block; width:100%; height:100%}
+
+  /* corner ticks on the stage, like a drafting frame */
+  .stage::after{
+    content:""; position:absolute; inset:14px; pointer-events:none; border:1px solid var(--line);
+    -webkit-mask:
+      linear-gradient(#000,#000) top left/26px 1px no-repeat,
+      linear-gradient(#000,#000) top left/1px 26px no-repeat,
+      linear-gradient(#000,#000) top right/26px 1px no-repeat,
+      linear-gradient(#000,#000) top right/1px 26px no-repeat,
+      linear-gradient(#000,#000) bottom left/26px 1px no-repeat,
+      linear-gradient(#000,#000) bottom left/1px 26px no-repeat,
+      linear-gradient(#000,#000) bottom right/26px 1px no-repeat,
+      linear-gradient(#000,#000) bottom right/1px 26px no-repeat;
+  }
+  .stage-label{
+    position:absolute; left:22px; bottom:18px; font-family:var(--fmono);
+    font-size:11px; color:var(--ink-faint); letter-spacing:.16em; text-transform:uppercase;
+    background:rgba(12,17,22,.55); padding:5px 9px; border:1px solid var(--line); border-radius:6px;
+  }
+  .viewbtns{position:absolute; right:22px; top:22px; display:flex; gap:8px;}
+  .viewbtns button{
+    font-family:var(--fmono); font-size:11px; letter-spacing:.08em; color:var(--ink-dim);
+    background:rgba(14,21,27,.7); border:1px solid var(--line2); padding:7px 11px; border-radius:7px; cursor:pointer;
+    transition:.15s;
+  }
+  .viewbtns button:hover{color:var(--ink); border-color:var(--amber); box-shadow:0 0 0 1px var(--amber) inset}
+
+  /* ---------- control groups ---------- */
+  .group{margin-bottom:18px; opacity:0; transform:translateY(8px); animation:rise .5s cubic-bezier(.2,.7,.2,1) forwards;}
+  .group:nth-child(1){animation-delay:.03s}.group:nth-child(2){animation-delay:.08s}
+  .group:nth-child(3){animation-delay:.13s}.group:nth-child(4){animation-delay:.18s}
+  .group:nth-child(5){animation-delay:.23s}.group:nth-child(6){animation-delay:.28s}
+  .group:nth-child(7){animation-delay:.33s}.group:nth-child(8){animation-delay:.38s}
+  @keyframes rise{to{opacity:1;transform:none}}
+
+  .ghead{
+    display:flex; align-items:center; gap:9px; margin:0 0 11px;
+    font-family:var(--fmono); font-size:11px; letter-spacing:.2em; text-transform:uppercase; color:var(--ink-dim);
+  }
+  .ghead .num{color:var(--amber); font-weight:700}
+  .ghead::after{content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--line2),transparent)}
+  .ghead.feat{color:var(--amber-soft)}
+  .ghead.feat .num{color:var(--cyan)}
+  .feature-tag{font-size:9px; letter-spacing:.14em; color:var(--cyan); border:1px solid var(--line2); padding:2px 6px; border-radius:20px;}
+
+  .row{display:grid; grid-template-columns:1fr auto; align-items:center; gap:8px; margin:9px 0 3px;}
+  .row label{font-size:12.5px; color:var(--ink-dim)}
+  .row .val{font-family:var(--fmono); font-size:12px; color:var(--ink); min-width:42px; text-align:right;}
+  .row .val .u{color:var(--ink-faint); font-size:10px; margin-left:2px}
+  input[type=range]{
+    grid-column:1/-1; -webkit-appearance:none; appearance:none; height:4px; border-radius:4px;
+    background:linear-gradient(90deg,var(--amber) 0%,var(--line2) 0%); background:var(--line2); cursor:pointer; margin:2px 0 6px;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:15px; height:15px; border-radius:50%;
+    background:var(--amber); border:2px solid #1a120b; box-shadow:0 0 0 1px var(--amber);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:15px;height:15px;border:2px solid #1a120b;border-radius:50%;background:var(--amber);box-shadow:0 0 0 1px var(--amber)}
+
+  .pair{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+
+  .toggle{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 8px;
+    padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:rgba(255,255,255,.012)}
+  .toggle span{font-size:12.5px; color:var(--ink-dim)}
+  .switch{position:relative; width:40px; height:22px; flex:none}
+  .switch input{opacity:0; width:0; height:0}
+  .slider{position:absolute; inset:0; background:var(--line2); border-radius:22px; transition:.18s; cursor:pointer}
+  .slider::before{content:""; position:absolute; height:16px; width:16px; left:3px; top:3px; background:#cdd9e1; border-radius:50%; transition:.18s}
+  .switch input:checked + .slider{background:var(--amber)}
+  .switch input:checked + .slider::before{transform:translateX(18px); background:#1a120b}
+
+  .btns{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:6px}
+  .btn{font-family:var(--fmono); font-size:12px; letter-spacing:.06em; padding:12px 10px; border-radius:9px; cursor:pointer; transition:.15s; border:1px solid var(--line2); color:var(--ink); background:rgba(255,255,255,.02)}
+  .btn:hover{border-color:var(--cyan); color:#fff}
+  .btn.primary{background:linear-gradient(180deg,var(--amber),#e0641c); border-color:#ffae6b; color:#1a0f06; font-weight:700}
+  .btn.primary:hover{box-shadow:var(--shadow)}
+
+  .readout{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:16px;}
+  .stat{border:1px solid var(--line); border-radius:9px; padding:10px; background:rgba(111,214,255,.03)}
+  .stat .k{font-family:var(--fmono); font-size:9.5px; letter-spacing:.16em; color:var(--ink-faint); text-transform:uppercase}
+  .stat .v{font-family:var(--fmono); font-size:17px; color:var(--cyan); margin-top:3px}
+  .stat .v small{font-size:10px; color:var(--ink-faint)}
+
+  .hint{font-size:11px; color:var(--ink-faint); line-height:1.5; margin:6px 2px 0}
+
+  #toast{position:fixed; left:50%; bottom:34px; transform:translate(-50%,20px); opacity:0;
+    background:#1a242d; border:1px solid var(--amber); color:var(--ink); font-family:var(--fmono); font-size:12px;
+    padding:10px 16px; border-radius:8px; transition:.25s; pointer-events:none; z-index:20}
+  #toast.show{opacity:1; transform:translate(-50%,0)}
+
+  #gf-err{position:absolute; inset:14px; display:flex; flex-direction:column; gap:12px;
+    align-items:flex-start; justify-content:center; padding:34px; z-index:30;
+    background:linear-gradient(180deg,rgba(12,17,22,.92),rgba(12,17,22,.96));
+    border:1px solid var(--amber); border-radius:10px; color:var(--ink);}
+  #gf-err h3{font-family:var(--fdisp); margin:0; font-size:20px; color:var(--amber)}
+  #gf-err p{margin:0; max-width:560px; line-height:1.55; color:var(--ink-dim); font-size:13.5px}
+  #gf-err code{font-family:var(--fmono); color:var(--cyan); background:rgba(111,214,255,.08); padding:2px 6px; border-radius:5px}
+  #gf-err pre{font-family:var(--fmono); font-size:11.5px; color:var(--ink-faint); white-space:pre-wrap;
+    background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:8px; padding:12px; max-width:560px; margin:4px 0 0; overflow:auto}
+
+  @media (max-width:880px){
+    main{grid-template-columns:1fr; grid-template-rows:1fr auto}
+    .console{order:2; border-right:0; border-top:1px solid var(--line); max-height:48vh}
+    .stage{order:1; min-height:46vh}
+    header{flex-wrap:wrap; gap:6px 18px}
+    .spec{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><b>GRID</b>FORGE</div>
+    <div class="tagline">parametric bin generator</div>
+    <div class="spec">grid <b>42mm</b> · unit <b>7mm</b> · base <b>4.75mm</b></div>
+  </header>
+
+  <main>
+    <!-- ============ CONSOLE ============ -->
+    <section class="console">
+      <div class="readout">
+        <div class="stat"><div class="k">Width</div><div class="v"><span id="dimW">—</span><small>mm</small></div></div>
+        <div class="stat"><div class="k">Depth</div><div class="v"><span id="dimD">—</span><small>mm</small></div></div>
+        <div class="stat"><div class="k">Height</div><div class="v"><span id="dimH">—</span><small>mm</small></div></div>
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">01</span> Footprint</p>
+        <div class="pair">
+          <div>
+            <div class="row"><label>Grid X</label><span class="val" data-out="gx"></span></div>
+            <input id="gx" type="range" min="1" max="8" step="1" value="2">
+          </div>
+          <div>
+            <div class="row"><label>Grid Y</label><span class="val" data-out="gy"></span></div>
+            <input id="gy" type="range" min="1" max="8" step="1" value="1">
+          </div>
+        </div>
+        <div class="row"><label>Height units (×7mm)</label><span class="val" data-out="heightUnits"></span></div>
+        <input id="heightUnits" type="range" min="2" max="20" step="1" value="6">
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">02</span> Walls &amp; floor</p>
+        <div class="row"><label>Wall thickness</label><span class="val"><span data-out="wall"></span><span class="u">mm</span></span></div>
+        <input id="wall" type="range" min="0.8" max="3" step="0.1" value="1.2">
+        <div class="row"><label>Floor thickness</label><span class="val"><span data-out="floor"></span><span class="u">mm</span></span></div>
+        <input id="floor" type="range" min="0.4" max="6" step="0.1" value="1.2">
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">03</span> Compartments</p>
+        <div class="pair">
+          <div>
+            <div class="row"><label>Columns</label><span class="val" data-out="divX"></span></div>
+            <input id="divX" type="range" min="1" max="8" step="1" value="1">
+          </div>
+          <div>
+            <div class="row"><label>Rows</label><span class="val" data-out="divY"></span></div>
+            <input id="divY" type="range" min="1" max="8" step="1" value="1">
+          </div>
+        </div>
+        <div class="row"><label>Divider thickness</label><span class="val"><span data-out="dividerThickness"></span><span class="u">mm</span></span></div>
+        <input id="dividerThickness" type="range" min="0.8" max="3" step="0.1" value="1.2">
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">04</span> Mounting holes</p>
+        <div class="toggle"><span>Magnet / screw holes</span>
+          <label class="switch"><input id="holesEnabled" type="checkbox"><span class="slider"></span></label>
+        </div>
+        <div class="row"><label>Diameter</label><span class="val"><span data-out="holeDiameter"></span><span class="u">mm</span></span></div>
+        <input id="holeDiameter" type="range" min="2" max="8" step="0.1" value="6">
+        <div class="row"><label>Depth</label><span class="val"><span data-out="holeDepth"></span><span class="u">mm</span></span></div>
+        <input id="holeDepth" type="range" min="1" max="4" step="0.1" value="2">
+      </div>
+
+      <div class="group">
+        <p class="ghead feat"><span class="num">05</span> Reinforcement indents <span class="feature-tag">STRENGTH</span></p>
+        <div class="row"><label>Count along height</label><span class="val" data-out="indentCount"></span></div>
+        <input id="indentCount" type="range" min="0" max="5" step="1" value="1">
+        <div class="row"><label>Depth</label><span class="val"><span data-out="indentDepth"></span><span class="u">mm</span></span></div>
+        <input id="indentDepth" type="range" min="0.2" max="1.5" step="0.1" value="0.6">
+        <div class="row"><label>Width (band)</label><span class="val"><span data-out="indentWidth"></span><span class="u">mm</span></span></div>
+        <input id="indentWidth" type="range" min="1" max="6" step="0.5" value="2.5">
+        <p class="hint">Recessed grooves wrap the outer wall to stiffen tall, thin-walled bins. They stay inside the footprint so bins still sit flush against neighbours.</p>
+      </div>
+
+      <div class="group">
+        <p class="ghead feat"><span class="num">06</span> Fitted lid <span class="feature-tag">ADD-ON</span></p>
+        <div class="toggle"><span>Generate matching lid</span>
+          <label class="switch"><input id="lidEnabled" type="checkbox" checked><span class="slider"></span></label>
+        </div>
+        <div class="row"><label>Fit clearance</label><span class="val"><span data-out="lidClearance"></span><span class="u">mm</span></span></div>
+        <input id="lidClearance" type="range" min="0.1" max="0.6" step="0.05" value="0.25">
+        <div class="pair">
+          <div>
+            <div class="row"><label>Lid wall</label><span class="val"><span data-out="lidWall"></span></span></div>
+            <input id="lidWall" type="range" min="0.8" max="3" step="0.1" value="1.6">
+          </div>
+          <div>
+            <div class="row"><label>Skirt</label><span class="val"><span data-out="lidSkirt"></span></span></div>
+            <input id="lidSkirt" type="range" min="3" max="12" step="0.5" value="6">
+          </div>
+        </div>
+        <div class="row"><label>Top thickness</label><span class="val"><span data-out="lidTop"></span><span class="u">mm</span></span></div>
+        <input id="lidTop" type="range" min="0.8" max="3" step="0.1" value="1.6">
+        <div class="toggle"><span>Show lid in view</span>
+          <label class="switch"><input id="showLid" type="checkbox" checked><span class="slider"></span></label>
+        </div>
+        <div class="toggle"><span>Exploded view</span>
+          <label class="switch"><input id="explode" type="checkbox" checked><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="group">
+        <p class="ghead"><span class="num">07</span> Export &nbsp;·&nbsp; <span id="triCount" style="color:var(--ink-dim)">0</span> tris</p>
+        <div class="btns">
+          <button class="btn primary" id="exportBin">↓ BIN .STL</button>
+          <button class="btn" id="exportLid">↓ LID .STL</button>
+        </div>
+        <p class="hint">Solids export in print orientation (+Z up). The bin is a set of watertight solids your slicer auto-unions into one body.</p>
+      </div>
+    </section>
+
+    <!-- ============ STAGE ============ -->
+    <section class="stage">
+      <div id="viewport"></div>
+      <div class="viewbtns"><button id="resetView">RESET VIEW</button></div>
+      <div class="stage-label">drag · orbit &nbsp;|&nbsp; scroll · zoom &nbsp;|&nbsp; +Z up</div>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+
+<!-- Failure watchdog: surfaces load/runtime problems instead of a blank view -->
+<script>
+  window.__GF_OK__ = false;
+  window.__gfError = function (e) {
+    if (window.__GF_OK__) return;
+    var v = document.getElementById('viewport');
+    if (!v || document.getElementById('gf-err')) return;
+    var detail = (e && (e.stack || e.message)) ? (e.stack || e.message) : (e + '');
+    var html =
+      '<div id="gf-err">' +
+      '<h3>The 3D view didn\u2019t start</h3>' +
+      '<p>This almost always means one of two things:</p>' +
+      '<p><b>1.</b> The page was opened straight from disk (a <code>file://</code> address). ' +
+      'Browsers block module loading that way. Serve the folder over HTTP instead \u2014 in this folder run ' +
+      '<code>python3 -m http.server 8000</code> and open <code>http://localhost:8000</code>. ' +
+      '(Or just open <code>standalone.html</code>, which works by double-click.)</p>' +
+      '<p><b>2.</b> three.js couldn\u2019t load from its CDN \u2014 check your internet connection.</p>' +
+      '<pre>' + detail.replace(/[<>&]/g, function (c) { return { '<':'&lt;','>':'&gt;','&':'&amp;' }[c]; }) + '</pre>' +
+      '</div>';
+    v.insertAdjacentHTML('beforeend', html);
+  };
+  window.addEventListener('error', function (ev) {
+    if (!window.__GF_OK__) window.__gfError(ev.error || ev.message || 'A script failed to load.');
+  }, true);
+  window.addEventListener('unhandledrejection', function (ev) {
+    if (!window.__GF_OK__) window.__gfError((ev.reason && ev.reason.message) || ev.reason || 'A module failed to load.');
+  });
+  setTimeout(function () {
+    if (!window.__GF_OK__) window.__gfError('Timed out: the 3D engine never initialised.');
+  }, 3500);
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+
+/* ===== earcut (inlined) ===== */
+/* earcut.js — polygon triangulation with holes.
+ * Faithful port of the Mapbox `earcut` algorithm (ISC License).
+ * Non-hashed inner loop (fine for the small polygons used here).
+ *
+ * earcut(data, holeIndices, dim) -> flat array of triangle vertex indices.
+ *   data: flat [x0,y0, x1,y1, ...]
+ *   holeIndices: array of ring start indices into the vertex list (not *dim)
+ *   dim: 2
+ */
+function earcut(data, holeIndices, dim) {
+  dim = dim || 2;
+  const hasHoles = holeIndices && holeIndices.length;
+  const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
+  let outerNode = linkedList(data, 0, outerLen, dim, true);
+  const triangles = [];
+  if (!outerNode || outerNode.next === outerNode.prev) return triangles;
+  if (hasHoles) outerNode = eliminateHoles(data, holeIndices, outerNode, dim);
+  earcutLinked(outerNode, triangles, dim);
+  return triangles;
+}
+
+function linkedList(data, start, end, dim, clockwise) {
+  let i, last;
+  if (clockwise === (signedArea(data, start, end, dim) > 0)) {
+    for (i = start; i < end; i += dim) last = insertNode(i, data[i], data[i + 1], last);
+  } else {
+    for (i = end - dim; i >= start; i -= dim) last = insertNode(i, data[i], data[i + 1], last);
+  }
+  if (last && equals(last, last.next)) { removeNode(last); last = last.next; }
+  return last;
+}
+
+function filterPoints(start, end) {
+  if (!start) return start;
+  if (!end) end = start;
+  let p = start, again;
+  do {
+    again = false;
+    if (!p.steiner && (equals(p, p.next) || area(p.prev, p, p.next) === 0)) {
+      removeNode(p);
+      p = end = p.prev;
+      if (p === p.next) break;
+      again = true;
+    } else {
+      p = p.next;
+    }
+  } while (again || p !== end);
+  return end;
+}
+
+function earcutLinked(ear, triangles, dim, pass) {
+  if (!ear) return;
+  ear = filterPoints(ear);
+  let stop = ear, prev, next;
+  while (ear.prev !== ear.next) {
+    prev = ear.prev;
+    next = ear.next;
+    if (isEar(ear)) {
+      triangles.push(prev.i / dim | 0, ear.i / dim | 0, next.i / dim | 0);
+      removeNode(ear);
+      ear = next.next;
+      stop = next.next;
+      continue;
+    }
+    ear = next;
+    if (ear === stop) {
+      if (!pass) earcutLinked(filterPoints(ear), triangles, dim, 1);
+      else if (pass === 1) { ear = cureLocalIntersections(filterPoints(ear), triangles, dim); earcutLinked(ear, triangles, dim, 2); }
+      else if (pass === 2) splitEarcut(ear, triangles, dim);
+      break;
+    }
+  }
+}
+
+function isEar(ear) {
+  const a = ear.prev, b = ear, c = ear.next;
+  if (area(a, b, c) >= 0) return false; // reflex
+  const ax=a.x, bx=b.x, cx=c.x, ay=a.y, by=b.y, cy=c.y;
+  const x0=Math.min(ax,bx,cx), y0=Math.min(ay,by,cy), x1=Math.max(ax,bx,cx), y1=Math.max(ay,by,cy);
+  let p = c.next;
+  while (p !== a) {
+    if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 &&
+        pointInTriangle(ax,ay,bx,by,cx,cy,p.x,p.y) &&
+        area(p.prev, p, p.next) >= 0) return false;
+    p = p.next;
+  }
+  return true;
+}
+
+function cureLocalIntersections(start, triangles, dim) {
+  let p = start;
+  do {
+    const a = p.prev, b = p.next.next;
+    if (!equals(a, b) && intersects(a, p, p.next, b) && locallyInside(a, b) && locallyInside(b, a)) {
+      triangles.push(a.i / dim | 0, p.i / dim | 0, b.i / dim | 0);
+      removeNode(p); removeNode(p.next);
+      p = start = b;
+    }
+    p = p.next;
+  } while (p !== start);
+  return filterPoints(p);
+}
+
+function splitEarcut(start, triangles, dim) {
+  let a = start;
+  do {
+    let b = a.next.next;
+    while (b !== a.prev) {
+      if (a.i !== b.i && isValidDiagonal(a, b)) {
+        let c = splitPolygon(a, b);
+        a = filterPoints(a, a.next);
+        c = filterPoints(c, c.next);
+        earcutLinked(a, triangles, dim);
+        earcutLinked(c, triangles, dim);
+        return;
+      }
+      b = b.next;
+    }
+    a = a.next;
+  } while (a !== start);
+}
+
+function eliminateHoles(data, holeIndices, outerNode, dim) {
+  const queue = [];
+  let i, len, start, end, list;
+  for (i = 0, len = holeIndices.length; i < len; i++) {
+    start = holeIndices[i] * dim;
+    end = i < len - 1 ? holeIndices[i + 1] * dim : data.length;
+    list = linkedList(data, start, end, dim, false);
+    if (list === list.next) list.steiner = true;
+    queue.push(getLeftmost(list));
+  }
+  queue.sort((a, b) => a.x - b.x);
+  for (i = 0; i < queue.length; i++) outerNode = eliminateHole(queue[i], outerNode);
+  return outerNode;
+}
+
+function eliminateHole(hole, outerNode) {
+  const bridge = findHoleBridge(hole, outerNode);
+  if (!bridge) return outerNode;
+  const bridgeReverse = splitPolygon(bridge, hole);
+  filterPoints(bridgeReverse, bridgeReverse.next);
+  return filterPoints(bridge, bridge.next);
+}
+
+function findHoleBridge(hole, outerNode) {
+  let p = outerNode, qx = -Infinity, m;
+  const hx = hole.x, hy = hole.y;
+  do {
+    if (hy <= p.y && hy >= p.next.y && p.next.y !== p.y) {
+      const x = p.x + (hy - p.y) * (p.next.x - p.x) / (p.next.y - p.y);
+      if (x <= hx && x > qx) {
+        qx = x;
+        m = p.x < p.next.x ? p : p.next;
+        if (x === hx) return m;
+      }
+    }
+    p = p.next;
+  } while (p !== outerNode);
+  if (!m) return null;
+  const stop = m, mx = m.x, my = m.y;
+  let tanMin = Infinity, tan;
+  p = m;
+  do {
+    if (hx >= p.x && p.x >= mx && hx !== p.x &&
+        pointInTriangle(hy < my ? hx : qx, hy, mx, my, hy < my ? qx : hx, hy, p.x, p.y)) {
+      tan = Math.abs(hy - p.y) / (hx - p.x);
+      if (locallyInside(p, hole) && (tan < tanMin || (tan === tanMin && (p.x > m.x || (p.x === m.x && sectorContainsSector(m, p)))))) {
+        m = p; tanMin = tan;
+      }
+    }
+    p = p.next;
+  } while (p !== stop);
+  return m;
+}
+
+function sectorContainsSector(m, p) {
+  return area(m.prev, m, p.prev) < 0 && area(p.next, m, m.next) < 0;
+}
+
+function getLeftmost(start) {
+  let p = start, leftmost = start;
+  do {
+    if (p.x < leftmost.x || (p.x === leftmost.x && p.y < leftmost.y)) leftmost = p;
+    p = p.next;
+  } while (p !== start);
+  return leftmost;
+}
+
+function pointInTriangle(ax, ay, bx, by, cx, cy, px, py) {
+  return (cx - px) * (ay - py) >= (ax - px) * (cy - py) &&
+         (ax - px) * (by - py) >= (bx - px) * (ay - py) &&
+         (bx - px) * (cy - py) >= (cx - px) * (by - py);
+}
+
+function isValidDiagonal(a, b) {
+  return a.next.i !== b.i && a.prev.i !== b.i && !intersectsPolygon(a, b) &&
+         ((locallyInside(a, b) && locallyInside(b, a) && middleInside(a, b) &&
+           (area(a.prev, a, b.prev) || area(a, b.prev, b))) ||
+          (equals(a, b) && area(a.prev, a, a.next) > 0 && area(b.prev, b, b.next) > 0));
+}
+
+function area(p, q, r) { return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y); }
+function equals(p1, p2) { return p1.x === p2.x && p1.y === p2.y; }
+
+function intersects(p1, q1, p2, q2) {
+  const o1 = sign(area(p1, q1, p2)), o2 = sign(area(p1, q1, q2));
+  const o3 = sign(area(p2, q2, p1)), o4 = sign(area(p2, q2, q1));
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && onSegment(p1, p2, q1)) return true;
+  if (o2 === 0 && onSegment(p1, q2, q1)) return true;
+  if (o3 === 0 && onSegment(p2, p1, q2)) return true;
+  if (o4 === 0 && onSegment(p2, q1, q2)) return true;
+  return false;
+}
+function onSegment(p, q, r) {
+  return q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) &&
+         q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y);
+}
+function sign(num) { return num > 0 ? 1 : num < 0 ? -1 : 0; }
+
+function intersectsPolygon(a, b) {
+  let p = a;
+  do {
+    if (p.i !== a.i && p.next.i !== a.i && p.i !== b.i && p.next.i !== b.i &&
+        intersects(p, p.next, a, b)) return true;
+    p = p.next;
+  } while (p !== a);
+  return false;
+}
+function locallyInside(a, b) {
+  return area(a.prev, a, a.next) < 0
+    ? area(a, b, a.next) >= 0 && area(a, a.prev, b) >= 0
+    : area(a, b, a.prev) < 0 || area(a, a.next, b) < 0;
+}
+function middleInside(a, b) {
+  let p = a, inside = false;
+  const px = (a.x + b.x) / 2, py = (a.y + b.y) / 2;
+  do {
+    if (((p.y > py) !== (p.next.y > py)) && p.next.y !== p.y &&
+        (px < (p.next.x - p.x) * (py - p.y) / (p.next.y - p.y) + p.x)) inside = !inside;
+    p = p.next;
+  } while (p !== a);
+  return inside;
+}
+
+function splitPolygon(a, b) {
+  const a2 = new Node(a.i, a.x, a.y), b2 = new Node(b.i, b.x, b.y);
+  const an = a.next, bp = b.prev;
+  a.next = b; b.prev = a;
+  a2.next = an; an.prev = a2;
+  b2.next = a2; a2.prev = b2;
+  bp.next = b2; b2.prev = bp;
+  return b2;
+}
+function insertNode(i, x, y, last) {
+  const p = new Node(i, x, y);
+  if (!last) { p.prev = p; p.next = p; }
+  else { p.next = last.next; p.prev = last; last.next.prev = p; last.next = p; }
+  return p;
+}
+function removeNode(p) {
+  p.next.prev = p.prev; p.prev.next = p.next;
+}
+function Node(i, x, y) {
+  this.i = i; this.x = x; this.y = y;
+  this.prev = null; this.next = null; this.steiner = false;
+}
+function signedArea(data, start, end, dim) {
+  let sum = 0;
+  for (let i = start, j = end - dim; i < end; i += dim) { sum += (data[j] - data[i]) * (data[i + 1] + data[j + 1]); j = i; }
+  return sum;
+}
+
+/* ===== gridfinity geometry core (inlined) ===== */
+/* =============================================================================
+ * geometry-core.js  —  Gridfinity geometry generator (no dependencies)
+ *
+ * Produces watertight triangle meshes as plain {positions:Float32Array} solids
+ * (non-indexed: 9 floats per triangle). No three.js, no CSG — so it runs in
+ * plain Node for testing and in the browser unchanged.
+ *
+ * Coordinate system: +Z up. Model centered on X/Y. Base sits at z = 0.
+ * The bin is emitted as a LIST of individually-watertight solids
+ * (feet + body cup + dividers). Slicers union overlapping closed solids, so the
+ * assembly prints as one piece. The lid is returned as a separate solid.
+ * ===========================================================================*/
+
+
+// ---- Gridfinity standard constants (mm) -----------------------------------
+const GRID = 42.0;       // grid pitch
+const CLEARANCE = 0.5;   // total XY clearance (0.25 / side)
+const HEIGHT_UNIT = 7.0; // z per height-unit
+const BASE_H = 4.75;     // total base/foot height
+const OUTER_R = 3.75;    // body corner radius
+// base profile, bottom -> up: chamfer / straight / chamfer (45° chamfers)
+const B_CHAMFER1 = 0.8;
+const B_STRAIGHT = 1.8;
+const B_CHAMFER2 = 2.15;
+const FOOT_FULL_HALF = (GRID - CLEARANCE) / 2; // 20.75
+
+// ---------------------------------------------------------------------------
+// Low-level mesh accumulator
+// ---------------------------------------------------------------------------
+class Mesh {
+  constructor() { this.v = []; } // flat list of triangle vertices (x,y,z,...)
+  tri(a, b, c) { this.v.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]); }
+  // quad a-b-c-d (CCW) -> two tris
+  quad(a, b, c, d) { this.tri(a, b, c); this.tri(a, c, d); }
+  solid() {
+    const positions = makeConsistent(new Float32Array(this.v));
+    return { positions };
+  }
+}
+
+// Signed volume (×6) of a triangle soup.
+function signedVolume6(p) {
+  let vol = 0;
+  for (let i = 0; i < p.length; i += 9) {
+    const ax=p[i],ay=p[i+1],az=p[i+2];
+    const bx=p[i+3],by=p[i+4],bz=p[i+5];
+    const cx=p[i+6],cy=p[i+7],cz=p[i+8];
+    const crx = by*cz - bz*cy, cry = bz*cx - bx*cz, crz = bx*cy - by*cx;
+    vol += (ax*crx + ay*cry + az*crz);
+  }
+  return vol;
+}
+
+// Weld vertices, make all adjacent face windings mutually consistent via a BFS
+// over shared edges, then flip globally so normals point outward (vol > 0).
+// Robust for any orientable closed manifold — removes the need to hand-tune the
+// winding of every individual face builder.
+function makeConsistent(positions) {
+  const nTri = positions.length / 9;
+  if (nTri === 0) return positions;
+  const Q = 1e4;
+  const map = new Map();
+  const verts = [];
+  const tri = [];
+  const vid = (x, y, z) => {
+    const k = `${Math.round(x*Q)},${Math.round(y*Q)},${Math.round(z*Q)}`;
+    let id = map.get(k);
+    if (id === undefined) { id = verts.length; verts.push([x, y, z]); map.set(k, id); }
+    return id;
+  };
+  for (let t = 0; t < nTri; t++) {
+    const o = t * 9;
+    tri.push([
+      vid(positions[o],   positions[o+1], positions[o+2]),
+      vid(positions[o+3], positions[o+4], positions[o+5]),
+      vid(positions[o+6], positions[o+7], positions[o+8]),
+    ]);
+  }
+  const ekey = (a, b) => (a < b ? a + '_' + b : b + '_' + a);
+  const edgeMap = new Map();
+  for (let t = 0; t < nTri; t++) {
+    const [a, b, c] = tri[t];
+    for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+      const k = ekey(u, v);
+      let arr = edgeMap.get(k);
+      if (!arr) { arr = []; edgeMap.set(k, arr); }
+      arr.push(t);
+    }
+  }
+  const visited = new Array(nTri).fill(false);
+  for (let s = 0; s < nTri; s++) {
+    if (visited[s]) continue;
+    visited[s] = true;
+    const stack = [s];
+    while (stack.length) {
+      const t = stack.pop();
+      const [a, b, c] = tri[t];
+      for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+        const arr = edgeMap.get(ekey(u, v));
+        for (const nt of arr) {
+          if (nt === t || visited[nt]) continue;
+          const [na, nb, nc] = tri[nt];
+          let sameDir = false, hasEdge = false;
+          for (const [p, q] of [[na, nb], [nb, nc], [nc, na]]) {
+            if (p === u && q === v) { sameDir = true; hasEdge = true; }
+            else if (p === v && q === u) { hasEdge = true; }
+          }
+          if (!hasEdge) continue;
+          if (sameDir) tri[nt] = [na, nc, nb]; // flip to oppose shared edge
+          visited[nt] = true;
+          stack.push(nt);
+        }
+      }
+    }
+  }
+  const out = new Float32Array(positions.length);
+  for (let t = 0; t < nTri; t++) {
+    const o = t * 9;
+    const [a, b, c] = tri[t];
+    out[o]=verts[a][0];   out[o+1]=verts[a][1]; out[o+2]=verts[a][2];
+    out[o+3]=verts[b][0]; out[o+4]=verts[b][1]; out[o+5]=verts[b][2];
+    out[o+6]=verts[c][0]; out[o+7]=verts[c][1]; out[o+8]=verts[c][2];
+  }
+  if (signedVolume6(out) < 0) {
+    for (let i = 0; i < out.length; i += 9)
+      for (let k = 0; k < 3; k++) { const tmp = out[i+3+k]; out[i+3+k] = out[i+6+k]; out[i+6+k] = tmp; }
+  }
+  return out;
+}
+
+// Ensure outward-facing normals: if signed volume is negative, swap winding.
+function fixOrientation(p) {
+  let vol = 0;
+  for (let i = 0; i < p.length; i += 9) {
+    const ax=p[i],ay=p[i+1],az=p[i+2];
+    const bx=p[i+3],by=p[i+4],bz=p[i+5];
+    const cx=p[i+6],cy=p[i+7],cz=p[i+8];
+    // (a · (b × c)) / 6
+    const crx = by*cz - bz*cy;
+    const cry = bz*cx - bx*cz;
+    const crz = bx*cy - by*cx;
+    vol += (ax*crx + ay*cry + az*crz);
+  }
+  if (vol < 0) {
+    for (let i = 0; i < p.length; i += 9) {
+      // swap vertex b and c
+      for (let k = 0; k < 3; k++) {
+        const t = p[i+3+k]; p[i+3+k] = p[i+6+k]; p[i+6+k] = t;
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2D loop generators (all returned CCW in XY)
+// ---------------------------------------------------------------------------
+// Rounded rectangle outline. Returns [[x,y],...] CCW, length = 4*(seg+1).
+function roundedRectLoop(halfX, halfY, r, seg) {
+  r = Math.max(0, Math.min(r, Math.min(halfX, halfY) - 1e-4));
+  const pts = [];
+  // corner centers, CCW starting bottom-right
+  const corners = [
+    [ halfX - r, -(halfY - r), -Math.PI / 2, 0           ], // BR
+    [ halfX - r,  (halfY - r),  0,            Math.PI / 2 ], // TR
+    [-(halfX - r),(halfY - r),  Math.PI / 2,  Math.PI     ], // TL
+    [-(halfX - r),-(halfY - r), Math.PI,      1.5*Math.PI ], // BL
+  ];
+  for (const [cx, cy, a0, a1] of corners) {
+    for (let s = 0; s <= seg; s++) {
+      const a = a0 + (a1 - a0) * (s / seg);
+      pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+    }
+  }
+  return pts;
+}
+
+// Circle, CW (so it acts as a hole when paired with a CCW outer loop).
+function circleLoopCW(cx, cy, radius, seg) {
+  const pts = [];
+  for (let s = 0; s < seg; s++) {
+    const a = -2 * Math.PI * (s / seg); // negative => CW
+    pts.push([cx + radius * Math.cos(a), cy + radius * Math.sin(a)]);
+  }
+  return pts;
+}
+
+function to3(loop, z) { return loop.map(p => [p[0], p[1], z]); }
+
+// ---------------------------------------------------------------------------
+// Face builders
+// ---------------------------------------------------------------------------
+// Connect two equal-length 3D loops with a ring of quads.
+// `flip` reverses winding (use for inward-facing surfaces).
+function ring(mesh, lo, up, flip) {
+  const n = lo.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    if (!flip) { mesh.quad(lo[i], up[i], up[j], lo[j]); }
+    else       { mesh.quad(lo[i], lo[j], up[j], up[i]); }
+  }
+}
+
+// Fan-triangulate a convex/near-convex loop to its centroid.
+// faceUp=true -> normal +Z ; false -> normal -Z
+function capFan(mesh, loop3d, faceUp) {
+  let cx = 0, cy = 0; const z = loop3d[0][2];
+  for (const p of loop3d) { cx += p[0]; cy += p[1]; }
+  cx /= loop3d.length; cy /= loop3d.length;
+  const c = [cx, cy, z];
+  const n = loop3d.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    if (faceUp) mesh.tri(c, loop3d[i], loop3d[j]);
+    else        mesh.tri(c, loop3d[j], loop3d[i]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Polygon triangulation with holes (ear clipping + bridge elimination).
+// Returns a list of 2D-coordinate triangles [[ [x,y],[x,y],[x,y] ], ...].
+// outer: CCW loop. holes: array of CW loops fully inside outer.
+// ---------------------------------------------------------------------------
+function area2(poly) {
+  let a = 0;
+  for (let i = 0, n = poly.length; i < n; i++) {
+    const p = poly[i], q = poly[(i + 1) % n];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return a / 2;
+}
+// Public: triangulate outer(CCW) with holes(CW) -> coord triangles.
+// Backed by the robust earcut algorithm (handles holes + slits reliably).
+function triangulateWithHoles(outer, holes) {
+  const data = [];
+  for (const p of outer) data.push(p[0], p[1]);
+  const holeIdx = [];
+  if (holes) for (const h of holes) { holeIdx.push(data.length / 2); for (const p of h) data.push(p[0], p[1]); }
+  const idx = earcut(data, holeIdx.length ? holeIdx : null, 2);
+  const tris = [];
+  for (let k = 0; k < idx.length; k += 3) {
+    const a = idx[k]*2, b = idx[k+1]*2, c = idx[k+2]*2;
+    tris.push([[data[a],data[a+1]], [data[b],data[b+1]], [data[c],data[c+1]]]);
+  }
+  return tris;
+}
+
+// ---------------------------------------------------------------------------
+// Solid builders
+// ---------------------------------------------------------------------------
+// Simple solid from a stack of {z, loop} layers (loops same length, CCW).
+function solidFromLayers(layers) {
+  const m = new Mesh();
+  capFan(m, layers[0].l3, false);                 // bottom (-Z)
+  for (let k = 0; k < layers.length - 1; k++) {
+    ring(m, layers[k].l3, layers[k + 1].l3, false); // outward sides
+  }
+  capFan(m, layers[layers.length - 1].l3, true);  // top (+Z)
+  return m.solid();
+}
+
+// A foot (single grid cell base) centered at (cx,cy), optionally with holes.
+function makeFoot(cx, cy, seg, holes /* [{x,y,r}] */, holeDepth, holeSeg) {
+  const profile = [
+    { z: 0.0,            half: FOOT_FULL_HALF - B_CHAMFER1 - B_CHAMFER2, dr: -(B_CHAMFER1 + B_CHAMFER2) },
+    { z: B_CHAMFER1,     half: FOOT_FULL_HALF - B_CHAMFER2,              dr: -(B_CHAMFER2) },
+    { z: B_CHAMFER1 + B_STRAIGHT, half: FOOT_FULL_HALF - B_CHAMFER2,     dr: -(B_CHAMFER2) },
+    { z: BASE_H,         half: FOOT_FULL_HALF,                            dr: 0 },
+  ];
+  const layers = profile.map(p => {
+    const r = Math.max(0.1, OUTER_R + p.dr);
+    const loop = roundedRectLoop(p.half, p.half, r, seg).map(pt => [pt[0] + cx, pt[1] + cy]);
+    return { l3: to3(loop, p.z) };
+  });
+
+  if (!holes || holes.length === 0) return solidFromLayers(layers);
+
+  // Foot with blind cylindrical holes opening from the bottom (z=0 up to holeDepth)
+  const m = new Mesh();
+  // sides + top cap as usual
+  for (let k = 0; k < layers.length - 1; k++) ring(m, layers[k].l3, layers[k + 1].l3, false);
+  capFan(m, layers[layers.length - 1].l3, true);
+  // holey bottom cap (faces -Z)
+  const outer = layers[0].l3.map(p => [p[0], p[1]]); // CCW
+  const holeLoops2d = holes.map(h => circleLoopCW(cx + h.x, cy + h.y, h.r, holeSeg));
+  const tris = triangulateWithHoles(outer, holeLoops2d);
+  const z0 = layers[0].l3[0][2];
+  for (const t of tris) {
+    // bottom faces -Z -> reverse winding from the CCW source
+    m.tri([t[0][0],t[0][1],z0], [t[2][0],t[2][1],z0], [t[1][0],t[1][1],z0]);
+  }
+  // each hole: cylinder wall (up) + blind top cap (faces -Z, into hole)
+  for (let hi = 0; hi < holes.length; hi++) {
+    const h = holes[hi];
+    const loop2 = holeLoops2d[hi];
+    const lo = to3(loop2, z0);
+    const up = to3(loop2, z0 + holeDepth);
+    ring(m, lo, up, true);          // wall normals point toward hole axis (outward of solid)
+    capFan(m, up, false);           // hole ceiling faces down into hole
+  }
+  return m.solid();
+}
+
+// The body "cup": outer walls (z baseH..total, with optional indents),
+// solid floor, inner cavity walls, cavity floor, and a flat top rim.
+function makeCup(opts) {
+  const { halfX, halfY, r, wall, total, cavityFloorZ, seg, indents } = opts;
+  const innerHalfX = halfX - wall, innerHalfY = halfY - wall;
+  const innerR = Math.max(0.5, r - wall);
+
+  // ----- outer z-stack (with indent grooves) -----
+  // Build list of {z, inset} key levels then materialize loops.
+  const levels = [{ z: BASE_H, inset: 0 }];
+  if (indents && indents.count > 0 && indents.depth > 0) {
+    const d = Math.min(indents.depth, wall - 0.4);
+    const w = indents.width;
+    const span = total - BASE_H;
+    for (let k = 1; k <= indents.count; k++) {
+      const zc = BASE_H + span * (k / (indents.count + 1));
+      const zb = zc - w / 2, zt = zc + w / 2;
+      if (zb <= BASE_H + 0.3 || zt >= total - 0.3) continue;
+      levels.push({ z: zb, inset: 0 }, { z: zb, inset: d },
+                  { z: zt, inset: d }, { z: zt, inset: 0 });
+    }
+  }
+  levels.push({ z: total, inset: 0 });
+
+  const m = new Mesh();
+  const outerLoops = levels.map(L =>
+    to3(roundedRectLoop(halfX - L.inset, halfY - L.inset, Math.max(0.3, r - L.inset), seg), L.z));
+  // outer bottom cap (slab underside, faces -Z)
+  capFan(m, outerLoops[0], false);
+  // outer side rings
+  for (let k = 0; k < outerLoops.length - 1; k++) ring(m, outerLoops[k], outerLoops[k + 1], false);
+
+  // ----- inner cavity -----
+  const innerTop = to3(roundedRectLoop(innerHalfX, innerHalfY, innerR, seg), total);
+  const innerBot = to3(roundedRectLoop(innerHalfX, innerHalfY, innerR, seg), cavityFloorZ);
+  // top rim ring (connect outer top -> inner top), faces +Z
+  ring(m, outerLoops[outerLoops.length - 1], innerTop, true);
+  // inner walls (cavity), normals face inward (flip)
+  ring(m, innerBot, innerTop, true);
+  // cavity floor (faces +Z, into cavity)
+  capFan(m, innerBot, true);
+
+  return m.solid();
+}
+
+// Axis-aligned (rounded-free) box solid.
+function boxSolid(cx, cy, z0, z1, sx, sy) {
+  const hx = sx / 2, hy = sy / 2;
+  const lo = [[cx-hx,cy-hy,z0],[cx+hx,cy-hy,z0],[cx+hx,cy+hy,z0],[cx-hx,cy+hy,z0]];
+  const up = lo.map(p => [p[0], p[1], z1]);
+  const m = new Mesh();
+  capFan(m, lo, false); capFan(m, up, true);
+  ring(m, lo, up, false);
+  return m.solid();
+}
+
+// ---------------------------------------------------------------------------
+// Public: build the bin (list of solids) and the lid (single solid)
+// ---------------------------------------------------------------------------
+function buildBin(p) {
+  const seg = p.cornerSegs ?? 8;
+  const gx = p.gx, gy = p.gy;
+  const total = p.heightUnits * HEIGHT_UNIT;
+  const wall = p.wall;
+  const halfX = (gx * GRID - CLEARANCE) / 2;
+  const halfY = (gy * GRID - CLEARANCE) / 2;
+  const cavityFloorZ = BASE_H + (p.floor ?? 1.2);
+  const solids = [];
+
+  // ---- feet ----
+  let footHoles = null, holeDepth = 0, holeSeg = 16;
+  if (p.holes && p.holes.enabled) {
+    holeDepth = Math.min(p.holes.depth, BASE_H - 0.6);
+    const off = 13; // hole offset from cell center (mm)
+    const hr = p.holes.diameter / 2;
+    footHoles = [
+      { x:  off, y:  off, r: hr }, { x: -off, y:  off, r: hr },
+      { x:  off, y: -off, r: hr }, { x: -off, y: -off, r: hr },
+    ];
+  }
+  for (let i = 0; i < gx; i++) {
+    for (let j = 0; j < gy; j++) {
+      const cx = (i - (gx - 1) / 2) * GRID;
+      const cy = (j - (gy - 1) / 2) * GRID;
+      solids.push(makeFoot(cx, cy, seg, footHoles, holeDepth, holeSeg));
+    }
+  }
+
+  // ---- body cup ----
+  solids.push(makeCup({ halfX, halfY, r: OUTER_R, wall, total, cavityFloorZ, seg, indents: p.indents }));
+
+  // ---- dividers ----
+  const innerHalfX = halfX - wall, innerHalfY = halfY - wall;
+  const dt = p.dividerThickness ?? wall;
+  const dz0 = cavityFloorZ - 0.6;       // dip into floor to fuse
+  const dz1 = total;                    // up to rim
+  const cols = Math.max(1, p.divX | 0), rows = Math.max(1, p.divY | 0);
+  // vertical dividers (split along X) -> walls running in Y
+  for (let c = 1; c < cols; c++) {
+    const x = -innerHalfX + (2 * innerHalfX) * (c / cols);
+    solids.push(boxSolid(x, 0, dz0, dz1, dt, innerHalfY * 2 + wall)); // overlap side walls
+  }
+  // horizontal dividers (split along Y) -> walls running in X
+  for (let rr = 1; rr < rows; rr++) {
+    const y = -innerHalfY + (2 * innerHalfY) * (rr / rows);
+    solids.push(boxSolid(0, y, dz0, dz1, innerHalfX * 2 + wall, dt));
+  }
+
+  return { solids, meta: { halfX, halfY, total, r: OUTER_R } };
+}
+
+function buildLid(p, binMeta) {
+  const seg = p.cornerSegs ?? 8;
+  const clr = p.lid.clearance ?? 0.25;
+  const lidWall = p.lid.wall ?? 1.6;
+  const skirtH = p.lid.skirtHeight ?? 6;
+  const topThk = p.lid.topThickness ?? 1.6;
+  const { halfX, halfY, r } = binMeta;
+
+  const pocketHX = halfX + clr, pocketHY = halfY + clr, pocketR = r + clr;
+  const outerHX = pocketHX + lidWall, outerHY = pocketHY + lidWall, outerR = pocketR + lidWall;
+  const H = skirtH + topThk;
+
+  const m = new Mesh();
+  const outerBot = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), 0);
+  const outerTop = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), H);
+  const pocketBot = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), 0);
+  const pocketCeil = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), skirtH);
+
+  capFan(m, outerTop, true);                 // lid top plate (+Z)
+  ring(m, outerBot, outerTop, false);        // outer skirt sides
+  ring(m, outerBot, pocketBot, true);        // bottom rim (faces -Z)
+  ring(m, pocketBot, pocketCeil, false);     // pocket inner walls (face into pocket)
+  capFan(m, pocketCeil, false);              // pocket ceiling (faces -Z into pocket)
+
+  return { solid: m.solid(), height: H, skirtH };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for consumers
+// ---------------------------------------------------------------------------
+function mergeSolids(solids) {
+  let n = 0; for (const s of solids) n += s.positions.length;
+  const out = new Float32Array(n);
+  let o = 0; for (const s of solids) { out.set(s.positions, o); o += s.positions.length; }
+  return { positions: out };
+}
+
+// Exposed for tests
+const __test = {
+  roundedRectLoop, circleLoopCW, triangulateWithHoles,
+  area2, makeFoot, makeCup, boxSolid, solidFromLayers, fixOrientation,
+};
+
+/* ===== app (inlined) ===== */
+/* app.js — viewport, parameter wiring, and STL export for the bin generator. */
+
+
+
+
+// ---------------------------------------------------------------------------
+// Scene
+// ---------------------------------------------------------------------------
+const viewport = document.getElementById('viewport');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c1116);
+scene.fog = new THREE.Fog(0x0c1116, 280, 620);
+
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 4000);
+camera.position.set(150, 130, 175);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+viewport.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, 18, 0);
+
+// ---- lighting: cool key + warm rim, soft fill (machinist bench feel) ----
+scene.add(new THREE.HemisphereLight(0x9fb4c4, 0x16110a, 0.55));
+const key = new THREE.DirectionalLight(0xfff1dd, 1.55);
+key.position.set(80, 140, 60);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.near = 10; key.shadow.camera.far = 600;
+key.shadow.camera.left = -160; key.shadow.camera.right = 160;
+key.shadow.camera.top = 160; key.shadow.camera.bottom = -160;
+key.shadow.bias = -0.0004;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xff8a3c, 0.6);
+rim.position.set(-120, 60, -90);
+scene.add(rim);
+const fill = new THREE.DirectionalLight(0x5fd0ff, 0.25);
+fill.position.set(-40, 30, 120);
+scene.add(fill);
+
+// ---- ground: shadow catcher + engineering grid ----
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(1200, 1200),
+  new THREE.ShadowMaterial({ opacity: 0.32 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.01;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const grid = new THREE.GridHelper(840, 20, 0xff8a3c, 0x24303a);
+grid.material.opacity = 0.5; grid.material.transparent = true;
+scene.add(grid);
+
+// ---- materials ----
+const binMat = new THREE.MeshStandardMaterial({
+  color: 0xff7a2f, metalness: 0.18, roughness: 0.62, flatShading: true,
+});
+const lidMat = new THREE.MeshStandardMaterial({
+  color: 0x6fd6ff, metalness: 0.22, roughness: 0.5, flatShading: true,
+  transparent: true, opacity: 0.96,
+});
+
+// model group oriented +Z(model) -> +Y(scene)
+const root = new THREE.Group();
+root.rotation.x = -Math.PI / 2;
+scene.add(root);
+
+let binMesh = null, lidMesh = null;
+let lastBinSolid = null, lastLidSolid = null, lastMeta = null;
+
+function disposeMesh(m) {
+  if (!m) return;
+  root.remove(m);
+  m.geometry.dispose();
+}
+function geomFromSolid(solid) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(solid.positions, 3));
+  g.computeVertexNormals(); // non-indexed => crisp flat facets
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Parameters
+// ---------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const ids = [
+  'gx','gy','heightUnits','wall','floor','divX','divY','dividerThickness',
+  'holesEnabled','holeDiameter','holeDepth',
+  'indentCount','indentDepth','indentWidth',
+  'lidEnabled','lidClearance','lidWall','lidSkirt','lidTop',
+  'showLid','explode',
+];
+function readParams() {
+  return {
+    gx: +$('gx').value, gy: +$('gy').value,
+    heightUnits: +$('heightUnits').value,
+    wall: +$('wall').value, floor: +$('floor').value,
+    divX: +$('divX').value, divY: +$('divY').value,
+    dividerThickness: +$('dividerThickness').value,
+    cornerSegs: 8,
+    holes: { enabled: $('holesEnabled').checked, diameter: +$('holeDiameter').value, depth: +$('holeDepth').value },
+    indents: { count: +$('indentCount').value, depth: +$('indentDepth').value, width: +$('indentWidth').value },
+    lid: { clearance: +$('lidClearance').value, wall: +$('lidWall').value, skirtHeight: +$('lidSkirt').value, topThickness: +$('lidTop').value },
+  };
+}
+
+// keep numeric readouts in sync
+function syncReadouts() {
+  document.querySelectorAll('[data-out]').forEach((el) => {
+    const src = $(el.dataset.out);
+    if (src) el.textContent = (+src.value).toFixed(src.step && src.step.includes('.') ? 1 : 0);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Regenerate
+// ---------------------------------------------------------------------------
+function regenerate() {
+  const p = readParams();
+  let bin;
+  try { bin = buildBin(p); } catch (e) { console.error(e); return; }
+  lastBinSolid = mergeSolids(bin.solids);
+  lastMeta = bin.meta;
+
+  disposeMesh(binMesh);
+  binMesh = new THREE.Mesh(geomFromSolid(lastBinSolid), binMat);
+  binMesh.castShadow = true; binMesh.receiveShadow = true;
+  root.add(binMesh);
+
+  disposeMesh(lidMesh); lidMesh = null; lastLidSolid = null;
+  if (p.lid && $('lidEnabled').checked) {
+    const lid = buildLid(p, bin.meta);
+    lastLidSolid = lid.solid;
+    lidMesh = new THREE.Mesh(geomFromSolid(lid.solid), lidMat);
+    lidMesh.castShadow = true;
+    lidMesh.userData.skirtH = lid.skirtH;
+    lidMesh.userData.height = lid.height;
+    root.add(lidMesh);
+  }
+  positionLid();
+  updateReadout(p);
+  frameModel();
+}
+
+function positionLid() {
+  if (!lidMesh || !lastMeta) return;
+  const show = $('showLid').checked;
+  lidMesh.visible = show;
+  const seatZ = lastMeta.total - lidMesh.userData.skirtH;
+  const gap = $('explode').checked ? 38 : 0;
+  // lid built with opening at local z=0; place along model +Z
+  lidMesh.position.set(0, 0, seatZ + gap);
+}
+
+function updateReadout(p) {
+  const W = (p.gx * 42 - 0.5), D = (p.gy * 42 - 0.5), H = p.heightUnits * 7;
+  $('dimW').textContent = W.toFixed(1);
+  $('dimD').textContent = D.toFixed(1);
+  $('dimH').textContent = H.toFixed(1);
+  const triCount = (lastBinSolid ? lastBinSolid.positions.length / 9 : 0) +
+                   (lastLidSolid ? lastLidSolid.positions.length / 9 : 0);
+  $('triCount').textContent = triCount.toLocaleString();
+}
+
+// fit camera target height to model without snapping the orbit each tweak
+let framedOnce = false;
+function frameModel() {
+  if (framedOnce) return;
+  framedOnce = true;
+  const p = readParams();
+  controls.target.set(0, (p.heightUnits * 7) / 2, 0);
+}
+
+// ---------------------------------------------------------------------------
+// STL export
+// ---------------------------------------------------------------------------
+const exporter = new STLExporter();
+function downloadSTL(solid, name) {
+  if (!solid) return;
+  const g = geomFromSolid(solid);
+  const mesh = new THREE.Mesh(g);
+  // export in model space (+Z up) which is the conventional print orientation
+  const str = exporter.parse(mesh, { binary: true });
+  const blob = new Blob([str], { type: 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  g.dispose();
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+let debounce;
+function onChange() {
+  syncReadouts();
+  clearTimeout(debounce);
+  debounce = setTimeout(regenerate, 110);
+}
+ids.forEach((id) => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener('input', onChange);
+  el.addEventListener('change', onChange);
+});
+$('showLid').addEventListener('change', positionLid);
+$('explode').addEventListener('change', positionLid);
+$('exportBin').addEventListener('click', () => downloadSTL(lastBinSolid, 'gridfinity-bin.stl'));
+$('exportLid').addEventListener('click', () =>
+  downloadSTL(lastLidSolid, 'gridfinity-lid.stl') || (!lastLidSolid && flash('Enable the lid first')));
+$('resetView').addEventListener('click', () => {
+  camera.position.set(150, 130, 175);
+  controls.target.set(0, (readParams().heightUnits * 7) / 2, 0);
+});
+
+function flash(msg) {
+  const el = $('toast'); el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+// ---------------------------------------------------------------------------
+// Resize + render loop
+// ---------------------------------------------------------------------------
+function resize() {
+  const w = viewport.clientWidth || viewport.parentElement.clientWidth || window.innerWidth;
+  const h = viewport.clientHeight || viewport.parentElement.clientHeight || window.innerHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(viewport);
+
+function tick() {
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+
+try {
+  resize();
+  syncReadouts();
+  regenerate();
+  // size can be 0 on the very first frame in some browsers; re-fit next frame
+  requestAnimationFrame(() => { resize(); });
+  tick();
+  if (typeof window !== 'undefined') window.__GF_OK__ = true;
+} catch (err) {
+  if (typeof window !== 'undefined' && window.__gfError) window.__gfError(err);
+  else console.error(err);
+}
+
+</script>
+</body>
+</html>
