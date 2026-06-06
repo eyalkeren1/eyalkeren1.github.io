@@ -93,10 +93,10 @@ function geomFromSolid(solid) {
 const $ = (id) => document.getElementById(id);
 const ids = [
   'gx','gy','heightUnits','wall','floor','divX','divY','dividerThickness',
-  'stackingLip',
+  'stackingLip','vaseMode',
   'holesEnabled','holeDiameter','holeDepth',
   'indentCount','indentRadius','indentDepth',
-  'lidEnabled','lidClearance','lidWall','lidSkirt','lidTop',
+  'lidEnabled','lidClearance','lidWall','lidSkirt','lidTop','lidPinch','lidStackable',
   'showLid','explode',
 ];
 function readParams() {
@@ -108,9 +108,14 @@ function readParams() {
     dividerThickness: +$('dividerThickness').value,
     cornerSegs: 8,
     stackingLip: $('stackingLip').checked,
+    vaseMode: $('vaseMode').checked,
     holes: { enabled: $('holesEnabled').checked, diameter: +$('holeDiameter').value, depth: +$('holeDepth').value },
     indents: { count: +$('indentCount').value, radius: +$('indentRadius').value, depth: +$('indentDepth').value },
-    lid: { clearance: +$('lidClearance').value, wall: +$('lidWall').value, skirtHeight: +$('lidSkirt').value, topThickness: +$('lidTop').value },
+    lid: {
+      clearance: +$('lidClearance').value, wall: +$('lidWall').value,
+      skirtHeight: +$('lidSkirt').value, topThickness: +$('lidTop').value,
+      pinchHandle: $('lidPinch').checked, stackable: $('lidStackable').checked,
+    },
   };
 }
 

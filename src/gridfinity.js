@@ -439,12 +439,13 @@ export function buildBin(p) {
   solids.push(makeCup({ halfX, halfY, wall, total, cavityFloorZ, seg,
     indents: p.indents, stackingLip: lipOn, lidThk }));
 
-  // ---- dividers ----
+  // ---- dividers ----  (skipped in vase mode: spiral vase needs a single contour)
   const innerHalfX = halfX - wall, innerHalfY = halfY - wall;
   const dt = p.dividerThickness ?? wall;
   const dz0 = cavityFloorZ - 0.6;       // dip into floor to fuse
   const dz1 = total;                    // up to rim
-  const cols = Math.max(1, p.divX | 0), rows = Math.max(1, p.divY | 0);
+  const cols = p.vaseMode ? 1 : Math.max(1, p.divX | 0);
+  const rows = p.vaseMode ? 1 : Math.max(1, p.divY | 0);
   // vertical dividers (split along X) -> walls running in Y
   for (let c = 1; c < cols; c++) {
     const x = -innerHalfX + (2 * innerHalfX) * (c / cols);
@@ -461,50 +462,112 @@ export function buildBin(p) {
     wallTop: total,
     total: lipOn ? total + LIP_H : total,    // full external height incl. lip
     stackingLip: lipOn,
+    vaseMode: !!p.vaseMode,
   };
   if (lipOn) meta.lip = lipGeometry(halfX, halfY, wall, total, lidThk);
   return { solids, meta };
 }
 
+// Closed rounded-rect prism (used for the inset lid plate).
+function platePrism(hx, hy, z0, z1, binHalfX, seg) {
+  const r = Math.max(0.3, OUTER_R - (binHalfX - hx));
+  const m = new Mesh();
+  const bot = to3(roundedRectLoop(hx, hy, r, seg), z0);
+  const top = to3(roundedRectLoop(hx, hy, r, seg), z1);
+  capFan(m, bot, false); ring(m, bot, top, false); capFan(m, top, true);
+  return m.solid();
+}
+
+// Closed annular stacking-lip "frame" sitting on top of a lid (so a bin can
+// nest on a lidded box). Bottom dips below baseZ to fuse with the lid plate.
+function makeLipRingOnTop(hx, hy, baseZ, seg) {
+  const cT = LIP_TOP_CHAMFER, rimTopW = 1.0;
+  const zb = baseZ - 0.6, zt = baseZ + LIP_H;   // dip bottom to fuse; top is full 4.4 above plate
+  const mk = (off, z) => to3(roundedRectLoop(
+    Math.max(0.6, hx - off), Math.max(0.6, hy - off), Math.max(0.3, OUTER_R - off), seg), z);
+  const oOutB = mk(0, zb), oOutT = mk(0, zt - cT), oCham = mk(cT, zt),
+        iRim = mk(cT + rimTopW, zt), iBot = mk(cT + rimTopW, zb);
+  const m = new Mesh();
+  ring(m, oOutB, oOutT, false); ring(m, oOutT, oCham, false); ring(m, oCham, iRim, false);
+  ring(m, iRim, iBot, false);   ring(m, iBot, oOutB, false); // closed square torus
+  return m.solid();
+}
+
+// Raised rounded rib for a 2-finger pinch grip, centred, standing up from topZ.
+function makeHandle(hx, hy, topZ, seg) {
+  const hl = Math.min(Math.max(Math.min(hx, hy) * 0.8, 8), 28); // half length
+  const ht = 3;   // half thickness (6 mm)
+  const hh = 8;   // height above the surface
+  const r = Math.min(ht * 0.8, 1.5);
+  const m = new Mesh();
+  const bot = to3(roundedRectLoop(hl, ht, r, seg), topZ - 0.6); // overlap to fuse
+  const top = to3(roundedRectLoop(hl, ht, r, seg), topZ + hh);
+  capFan(m, bot, false); ring(m, bot, top, false); capFan(m, top, true);
+  return m.solid();
+}
+
 export function buildLid(p, binMeta) {
   const seg = p.cornerSegs ?? 8;
-  const clr = (p.lid && p.lid.clearance) ?? 0.25;
+  const lp = p.lid || {};
+  const clr = lp.clearance ?? 0.25;
+  const ld = Math.min(Math.max(lp.topThickness ?? 1.6, 0.8), 3.0);
+  const pinch = !!lp.pinchHandle;
+  const stackable = !!lp.stackable;
+  const parts = [];
+  let seatZ, lipTop, height, inset = false;
 
-  // --- flush inset lid: drops into the stacking-lip recess, top flush with rim ---
-  if (binMeta.lip) {
+  if (stackable) {
+    // Capping over-lid with a stacking lip on top: presents a Gridfinity surface
+    // so another bin nests on a closed box.
+    const lidWall = lp.wall ?? 1.6, skirtH = lp.skirtHeight ?? 6;
+    const { halfX, halfY } = binMeta;
+    const pocketHX = halfX + clr, pocketHY = halfY + clr, pocketR = OUTER_R + clr;
+    const outerHX = pocketHX + lidWall, outerHY = pocketHY + lidWall, outerR = pocketR + lidWall;
+    const plateTopZ = skirtH + ld;
+    const m = new Mesh();
+    const outerBot = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), 0);
+    const outerTop = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), plateTopZ);
+    const pocketBot = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), 0);
+    const pocketCeil = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), skirtH);
+    capFan(m, outerTop, true);
+    ring(m, outerBot, outerTop, false);
+    ring(m, outerBot, pocketBot, false);
+    ring(m, pocketBot, pocketCeil, false);
+    capFan(m, pocketCeil, false);
+    parts.push(m.solid());
+    parts.push(makeLipRingOnTop(outerHX, outerHY, plateTopZ, seg)); // stacking surface
+    seatZ = binMeta.wallTop - skirtH; lipTop = plateTopZ + LIP_H; height = lipTop;
+    if (pinch) parts.push(makeHandle(outerHX, outerHY, plateTopZ, seg));
+  } else if (binMeta.lip) {
+    // Flush inset lid: drops into the lip recess, top flush with the rim.
     const L = binMeta.lip;
     const plateHX = Math.max(1, L.Ax - clr), plateHY = Math.max(1, L.Ay - clr);
-    const pr = Math.max(0.3, OUTER_R - (binMeta.halfX - plateHX));
-    const ld = L.ld;
+    parts.push(platePrism(plateHX, plateHY, 0, ld, binMeta.halfX, seg));
+    seatZ = L.ledgeZ; lipTop = L.lipTop; height = ld; inset = true;
+    if (pinch) parts.push(makeHandle(plateHX, plateHY, ld, seg));
+  } else {
+    // Plain over-lid (no stacking lip on the bin).
+    const lidWall = lp.wall ?? 1.6, skirtH = lp.skirtHeight ?? 6;
+    const { halfX, halfY } = binMeta;
+    const pocketHX = halfX + clr, pocketHY = halfY + clr, pocketR = OUTER_R + clr;
+    const outerHX = pocketHX + lidWall, outerHY = pocketHY + lidWall, outerR = pocketR + lidWall;
+    const H = skirtH + ld;
     const m = new Mesh();
-    const bot = to3(roundedRectLoop(plateHX, plateHY, pr, seg), 0);
-    const top = to3(roundedRectLoop(plateHX, plateHY, pr, seg), ld);
-    capFan(m, bot, false);
-    ring(m, bot, top, false);
-    capFan(m, top, true);
-    return { solid: m.solid(), height: ld, seatZ: L.ledgeZ, lipTop: L.lipTop, inset: true };
+    const outerBot = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), 0);
+    const outerTop = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), H);
+    const pocketBot = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), 0);
+    const pocketCeil = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), skirtH);
+    capFan(m, outerTop, true);
+    ring(m, outerBot, outerTop, false);
+    ring(m, outerBot, pocketBot, false);
+    ring(m, pocketBot, pocketCeil, false);
+    capFan(m, pocketCeil, false);
+    parts.push(m.solid());
+    seatZ = binMeta.wallTop - skirtH; lipTop = binMeta.wallTop; height = H;
+    if (pinch) parts.push(makeHandle(outerHX, outerHY, H, seg));
   }
 
-  // --- fallback over-lid (shoebox) when the bin has no stacking lip ---
-  const lidWall = (p.lid && p.lid.wall) ?? 1.6;
-  const skirtH = (p.lid && p.lid.skirtHeight) ?? 6;
-  const topThk = (p.lid && p.lid.topThickness) ?? 1.6;
-  const { halfX, halfY, r } = binMeta;
-  const pocketHX = halfX + clr, pocketHY = halfY + clr, pocketR = r + clr;
-  const outerHX = pocketHX + lidWall, outerHY = pocketHY + lidWall, outerR = pocketR + lidWall;
-  const H = skirtH + topThk;
-
-  const m = new Mesh();
-  const outerBot = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), 0);
-  const outerTop = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), H);
-  const pocketBot = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), 0);
-  const pocketCeil = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), skirtH);
-  capFan(m, outerTop, true);
-  ring(m, outerBot, outerTop, false);
-  ring(m, outerBot, pocketBot, true);
-  ring(m, pocketBot, pocketCeil, false);
-  capFan(m, pocketCeil, false);
-  return { solid: m.solid(), height: H, seatZ: binMeta.wallTop - skirtH, lipTop: binMeta.wallTop, inset: false };
+  return { solid: mergeSolids(parts), height, seatZ, lipTop, inset, stackable };
 }
 
 // ---------------------------------------------------------------------------
