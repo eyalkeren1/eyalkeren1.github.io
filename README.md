@@ -16,6 +16,21 @@ adds these requested features:
 Plus the standard controls: grid footprint (X×Y), height in 7 mm units, wall and floor
 thickness, row/column compartment dividers, and magnet/screw holes in the feet.
 
+### Vase mode
+
+A toggle that makes the bin a single continuous contour (it drops the dividers) so it can
+be printed in your slicer's **Spiralize Outer Contour / Spiral Vase** mode: one single-wall
+perimeter, solid bottom layers, open top. Set the wall to about one line width (0.8–1.2 mm)
+and turn on spiral vase in the slicer. The stacking lip is kept as a solid connector at the
+top — it isn't part of the spiral, matching how vase-mode Gridfinity bins are printed.
+
+### Lid options
+
+- **Pinch handle** — a raised central rib you grip between two fingers to lift the lid off.
+- **Stackable lid** — the lid caps over the rim and carries its own stacking lip on top, so
+  another bin nests onto a closed box. (This makes it a capping lid rather than a flush inset
+  one.) Combining it with the pinch handle places the handle inside the stack socket.
+
 ## Running it
 
 **Easiest:** open **`standalone.html`** — it inlines all the local code, so it works by
