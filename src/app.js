@@ -93,8 +93,9 @@ function geomFromSolid(solid) {
 const $ = (id) => document.getElementById(id);
 const ids = [
   'gx','gy','heightUnits','wall','floor','divX','divY','dividerThickness',
+  'stackingLip',
   'holesEnabled','holeDiameter','holeDepth',
-  'indentCount','indentDepth','indentWidth',
+  'indentCount','indentRadius','indentDepth',
   'lidEnabled','lidClearance','lidWall','lidSkirt','lidTop',
   'showLid','explode',
 ];
@@ -106,8 +107,9 @@ function readParams() {
     divX: +$('divX').value, divY: +$('divY').value,
     dividerThickness: +$('dividerThickness').value,
     cornerSegs: 8,
+    stackingLip: $('stackingLip').checked,
     holes: { enabled: $('holesEnabled').checked, diameter: +$('holeDiameter').value, depth: +$('holeDepth').value },
-    indents: { count: +$('indentCount').value, depth: +$('indentDepth').value, width: +$('indentWidth').value },
+    indents: { count: +$('indentCount').value, radius: +$('indentRadius').value, depth: +$('indentDepth').value },
     lid: { clearance: +$('lidClearance').value, wall: +$('lidWall').value, skirtHeight: +$('lidSkirt').value, topThickness: +$('lidTop').value },
   };
 }
@@ -141,7 +143,7 @@ function regenerate() {
     lastLidSolid = lid.solid;
     lidMesh = new THREE.Mesh(geomFromSolid(lid.solid), lidMat);
     lidMesh.castShadow = true;
-    lidMesh.userData.skirtH = lid.skirtH;
+    lidMesh.userData.seatZ = lid.seatZ;
     lidMesh.userData.height = lid.height;
     root.add(lidMesh);
   }
@@ -152,16 +154,17 @@ function regenerate() {
 
 function positionLid() {
   if (!lidMesh || !lastMeta) return;
-  const show = $('showLid').checked;
-  lidMesh.visible = show;
-  const seatZ = lastMeta.total - lidMesh.userData.skirtH;
+  lidMesh.visible = $('showLid').checked;
+  const seatZ = lidMesh.userData.seatZ;
   const gap = $('explode').checked ? 38 : 0;
-  // lid built with opening at local z=0; place along model +Z
+  // lid built with its underside at local z=0; place along model +Z
   lidMesh.position.set(0, 0, seatZ + gap);
 }
 
 function updateReadout(p) {
-  const W = (p.gx * 42 - 0.5), D = (p.gy * 42 - 0.5), H = p.heightUnits * 7;
+  const W = lastMeta ? lastMeta.halfX * 2 : (p.gx * 42 - 0.5);
+  const D = lastMeta ? lastMeta.halfY * 2 : (p.gy * 42 - 0.5);
+  const H = lastMeta ? lastMeta.total : p.heightUnits * 7; // includes lip when present
   $('dimW').textContent = W.toFixed(1);
   $('dimD').textContent = D.toFixed(1);
   $('dimH').textContent = H.toFixed(1);

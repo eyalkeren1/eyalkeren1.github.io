@@ -25,6 +25,28 @@ const B_STRAIGHT = 1.8;
 const B_CHAMFER2 = 2.15;
 const FOOT_FULL_HALF = (GRID - CLEARANCE) / 2; // 20.75
 
+// Stacking lip (per Gridfinity spec: adds 4.4mm at the top). Outer top chamfer
+// is 45°; the rim overhangs slightly to locate a stacked bin's feet.
+const LIP_H = 4.4;
+const LIP_TOP_CHAMFER = 1.9;          // 45° outer chamfer at the very top
+const LIP_VERT = LIP_H - LIP_TOP_CHAMFER; // 2.5 straight before the chamfer
+
+// Derived lip + inset-lid-ledge geometry, shared by the cup and the lid so they
+// always mate. `lidThk` sets the ledge depth so the inset lid sits flush.
+function lipGeometry(halfX, halfY, wall, total, lidThk) {
+  const cT = LIP_TOP_CHAMFER;
+  const rimTopW = Math.max(0.8, wall - 0.2);          // flat rim-top width
+  const support = 1.0;                                // ledge overhang under lid edge
+  const ld = Math.min(Math.max(lidThk ?? 1.6, 0.8), 3.0);
+  const lipTop = total + LIP_H;
+  const ledgeZ = lipTop - ld;                          // shelf the lid rests on
+  return {
+    cT, rimTopW, support, ld, lipTop, ledgeZ,
+    Ax: halfX - cT - rimTopW,                          // rim inner-top X half
+    Ay: halfY - cT - rimTopW,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Low-level mesh accumulator
 // ---------------------------------------------------------------------------
@@ -301,49 +323,71 @@ function makeFoot(cx, cy, seg, holes /* [{x,y,r}] */, holeDepth, holeSeg) {
   return m.solid();
 }
 
-// The body "cup": outer walls (z baseH..total, with optional indents),
-// solid floor, inner cavity walls, cavity floor, and a flat top rim.
-function makeCup(opts) {
-  const { halfX, halfY, r, wall, total, cavityFloorZ, seg, indents } = opts;
-  const innerHalfX = halfX - wall, innerHalfY = halfY - wall;
-  const innerR = Math.max(0.5, r - wall);
+// Sweep a sequence of concentric rounded-rect loops (each {off, z}) into a
+// watertight tube, capping the first and last loop. `off` is the inward radial
+// offset from the outer half-extents. Winding is fixed by makeConsistent().
+function sweepLoops(levels, halfX, halfY, seg) {
+  const m = new Mesh();
+  const loops = levels.map(L => to3(
+    roundedRectLoop(Math.max(0.5, halfX - L.off), Math.max(0.5, halfY - L.off),
+      Math.max(0.3, OUTER_R - L.off), seg), L.z));
+  capFan(m, loops[0], false);
+  for (let k = 0; k < loops.length - 1; k++) ring(m, loops[k], loops[k + 1], false);
+  capFan(m, loops[loops.length - 1], true);
+  return m.solid();
+}
 
-  // ----- outer z-stack (with indent grooves) -----
-  // Build list of {z, inset} key levels then materialize loops.
-  const levels = [{ z: BASE_H, inset: 0 }];
-  if (indents && indents.count > 0 && indents.depth > 0) {
-    const d = Math.min(indents.depth, wall - 0.4);
-    const w = indents.width;
+// The body "cup": outer wall (with optional rounded reinforcement grooves),
+// solid floor, inner cavity, and either a flat rim or a stacking lip with a
+// flush inset-lid ledge. Built as one swept tube of concentric loops.
+function makeCup(opts) {
+  const { halfX, halfY, wall, total, cavityFloorZ, seg, indents, stackingLip, lidThk } = opts;
+
+  const levels = [{ off: 0, z: BASE_H }];
+
+  // rounded reinforcement grooves (circular-arc cross-section, radius-driven)
+  if (indents && indents.count > 0) {
     const span = total - BASE_H;
-    for (let k = 1; k <= indents.count; k++) {
-      const zc = BASE_H + span * (k / (indents.count + 1));
-      const zb = zc - w / 2, zt = zc + w / 2;
-      if (zb <= BASE_H + 0.3 || zt >= total - 0.3) continue;
-      levels.push({ z: zb, inset: 0 }, { z: zb, inset: d },
-                  { z: zt, inset: d }, { z: zt, inset: 0 });
+    const rad = Math.max(0.4, indents.radius ?? 1.5);
+    const depth = Math.min(rad, wall - 0.4, indents.depth ?? rad);
+    if (depth > 0.05) {
+      const h = Math.sqrt(Math.max(0, rad * rad - (rad - depth) * (rad - depth))); // half band height
+      const M = 6;
+      for (let k = 1; k <= indents.count; k++) {
+        const zc = BASE_H + span * (k / (indents.count + 1));
+        if (zc - h <= BASE_H + 0.4 || zc + h >= total - 0.4) continue;
+        for (let s = -M; s <= M; s++) {
+          const dz = h * (s / M);
+          const inset = depth - rad + Math.sqrt(Math.max(0, rad * rad - dz * dz));
+          levels.push({ off: Math.max(0, inset), z: zc + dz });
+        }
+      }
     }
   }
-  levels.push({ z: total, inset: 0 });
 
-  const m = new Mesh();
-  const outerLoops = levels.map(L =>
-    to3(roundedRectLoop(halfX - L.inset, halfY - L.inset, Math.max(0.3, r - L.inset), seg), L.z));
-  // outer bottom cap (slab underside, faces -Z)
-  capFan(m, outerLoops[0], false);
-  // outer side rings
-  for (let k = 0; k < outerLoops.length - 1; k++) ring(m, outerLoops[k], outerLoops[k + 1], false);
+  levels.push({ off: 0, z: total }); // top of outer wall
 
-  // ----- inner cavity -----
-  const innerTop = to3(roundedRectLoop(innerHalfX, innerHalfY, innerR, seg), total);
-  const innerBot = to3(roundedRectLoop(innerHalfX, innerHalfY, innerR, seg), cavityFloorZ);
-  // top rim ring (connect outer top -> inner top), faces +Z
-  ring(m, outerLoops[outerLoops.length - 1], innerTop, true);
-  // inner walls (cavity), normals face inward (flip)
-  ring(m, innerBot, innerTop, true);
-  // cavity floor (faces +Z, into cavity)
-  capFan(m, innerBot, true);
+  if (stackingLip) {
+    const L = lipGeometry(halfX, halfY, wall, total, lidThk);
+    const rimOff = L.cT + L.rimTopW;
+    levels.push(
+      { off: 0,               z: total + LIP_VERT },     // straight lip wall
+      { off: L.cT,            z: L.lipTop },             // 45° outer top chamfer
+      { off: rimOff,          z: L.lipTop },             // flat rim top -> inner edge
+      { off: rimOff,          z: L.ledgeZ },             // overhang wall (= lid depth)
+      { off: rimOff + L.support, z: L.ledgeZ },          // ledge shelf (lid rests here)
+      { off: rimOff + L.support, z: L.ledgeZ - 0.8 },    // ledge front face
+      { off: wall,            z: L.ledgeZ - 0.8 },       // back out to cavity wall
+      { off: wall,            z: cavityFloorZ },         // down to floor
+    );
+  } else {
+    levels.push(
+      { off: wall, z: total },          // flat rim across
+      { off: wall, z: cavityFloorZ },   // down cavity wall to floor
+    );
+  }
 
-  return m.solid();
+  return sweepLoops(levels, halfX, halfY, seg);
 }
 
 // Axis-aligned (rounded-free) box solid.
@@ -390,7 +434,10 @@ export function buildBin(p) {
   }
 
   // ---- body cup ----
-  solids.push(makeCup({ halfX, halfY, r: OUTER_R, wall, total, cavityFloorZ, seg, indents: p.indents }));
+  const lipOn = !!p.stackingLip;
+  const lidThk = (p.lid && p.lid.topThickness) ?? 1.6;
+  solids.push(makeCup({ halfX, halfY, wall, total, cavityFloorZ, seg,
+    indents: p.indents, stackingLip: lipOn, lidThk }));
 
   // ---- dividers ----
   const innerHalfX = halfX - wall, innerHalfY = halfY - wall;
@@ -409,17 +456,40 @@ export function buildBin(p) {
     solids.push(boxSolid(0, y, dz0, dz1, innerHalfX * 2 + wall, dt));
   }
 
-  return { solids, meta: { halfX, halfY, total, r: OUTER_R } };
+  const meta = {
+    halfX, halfY, r: OUTER_R,
+    wallTop: total,
+    total: lipOn ? total + LIP_H : total,    // full external height incl. lip
+    stackingLip: lipOn,
+  };
+  if (lipOn) meta.lip = lipGeometry(halfX, halfY, wall, total, lidThk);
+  return { solids, meta };
 }
 
 export function buildLid(p, binMeta) {
   const seg = p.cornerSegs ?? 8;
-  const clr = p.lid.clearance ?? 0.25;
-  const lidWall = p.lid.wall ?? 1.6;
-  const skirtH = p.lid.skirtHeight ?? 6;
-  const topThk = p.lid.topThickness ?? 1.6;
-  const { halfX, halfY, r } = binMeta;
+  const clr = (p.lid && p.lid.clearance) ?? 0.25;
 
+  // --- flush inset lid: drops into the stacking-lip recess, top flush with rim ---
+  if (binMeta.lip) {
+    const L = binMeta.lip;
+    const plateHX = Math.max(1, L.Ax - clr), plateHY = Math.max(1, L.Ay - clr);
+    const pr = Math.max(0.3, OUTER_R - (binMeta.halfX - plateHX));
+    const ld = L.ld;
+    const m = new Mesh();
+    const bot = to3(roundedRectLoop(plateHX, plateHY, pr, seg), 0);
+    const top = to3(roundedRectLoop(plateHX, plateHY, pr, seg), ld);
+    capFan(m, bot, false);
+    ring(m, bot, top, false);
+    capFan(m, top, true);
+    return { solid: m.solid(), height: ld, seatZ: L.ledgeZ, lipTop: L.lipTop, inset: true };
+  }
+
+  // --- fallback over-lid (shoebox) when the bin has no stacking lip ---
+  const lidWall = (p.lid && p.lid.wall) ?? 1.6;
+  const skirtH = (p.lid && p.lid.skirtHeight) ?? 6;
+  const topThk = (p.lid && p.lid.topThickness) ?? 1.6;
+  const { halfX, halfY, r } = binMeta;
   const pocketHX = halfX + clr, pocketHY = halfY + clr, pocketR = r + clr;
   const outerHX = pocketHX + lidWall, outerHY = pocketHY + lidWall, outerR = pocketR + lidWall;
   const H = skirtH + topThk;
@@ -429,14 +499,12 @@ export function buildLid(p, binMeta) {
   const outerTop = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), H);
   const pocketBot = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), 0);
   const pocketCeil = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), skirtH);
-
-  capFan(m, outerTop, true);                 // lid top plate (+Z)
-  ring(m, outerBot, outerTop, false);        // outer skirt sides
-  ring(m, outerBot, pocketBot, true);        // bottom rim (faces -Z)
-  ring(m, pocketBot, pocketCeil, false);     // pocket inner walls (face into pocket)
-  capFan(m, pocketCeil, false);              // pocket ceiling (faces -Z into pocket)
-
-  return { solid: m.solid(), height: H, skirtH };
+  capFan(m, outerTop, true);
+  ring(m, outerBot, outerTop, false);
+  ring(m, outerBot, pocketBot, true);
+  ring(m, pocketBot, pocketCeil, false);
+  capFan(m, pocketCeil, false);
+  return { solid: m.solid(), height: H, seatZ: binMeta.wallTop - skirtH, lipTop: binMeta.wallTop, inset: false };
 }
 
 // ---------------------------------------------------------------------------
