@@ -532,44 +532,115 @@ function ringStackSolid(levels, binHalfX, seg, holes) {
   return m.solid();
 }
 
-// Recessed two-finger pinch grip: two opposing finger-shaped wells pressed DOWN
-// into the lid top (toward the inside of the bin). Nothing stands above the lid.
-// Returns the elliptical openings to cut in the lid top (`holes`, CW) and the
-// thin-walled cup solids that form the wells (`cups`). `topZ` is the local Z of
-// the surface the fingers enter; wells reach `depth` below it. centreHX/centreHY
-// bound the flat central area available between the two pads.
+// Triangulate a (possibly concave) 2D loop as a horizontal cap at height z.
+function capLoop(mesh, loop2d, z) {
+  for (const t of triangulateWithHoles(loop2d, []))
+    mesh.tri([t[0][0], t[0][1], z], [t[1][0], t[1][1], z], [t[2][0], t[2][1], z]);
+}
+
+// Curved "finger" outline: a capsule swept along a circular arc (centre of
+// curvature at C, centreline radius R, half-width hw, base direction `dir`,
+// half-sweep `alpha`), with rounded ends. Used so the two pinch wells curve
+// toward each other like a pinching thumb + finger. `cw` picks the winding.
+function fingerLoop(Cx, Cy, R, hw, dir, alpha, cw, arcSeg, capSeg) {
+  arcSeg = arcSeg ?? 14; capSeg = capSeg ?? 6;
+  const pts = [];
+  const at = (rad, phi) => [Cx + rad * Math.cos(phi), Cy + rad * Math.sin(phi)];
+  for (let i = 0; i <= arcSeg; i++)                       // outer arc
+    pts.push(at(R + hw, dir - alpha + 2 * alpha * i / arcSeg));
+  { const phe = dir + alpha, cxp = Cx + R*Math.cos(phe), cyp = Cy + R*Math.sin(phe);
+    const rx = Math.cos(phe), ry = Math.sin(phe), tx = -Math.sin(phe), ty = Math.cos(phe);
+    for (let j = 1; j <= capSeg - 1; j++) { const th = Math.PI * j / capSeg;
+      pts.push([cxp + hw*(Math.cos(th)*rx + Math.sin(th)*tx),
+                cyp + hw*(Math.cos(th)*ry + Math.sin(th)*ty)]); } }
+  for (let i = 0; i <= arcSeg; i++)                       // inner arc (reverse)
+    pts.push(at(R - hw, dir + alpha - 2 * alpha * i / arcSeg));
+  { const phs = dir - alpha, cxp = Cx + R*Math.cos(phs), cyp = Cy + R*Math.sin(phs);
+    const rx = Math.cos(phs), ry = Math.sin(phs), tx = -Math.sin(phs), ty = Math.cos(phs);
+    for (let j = 1; j <= capSeg - 1; j++) { const th = Math.PI * j / capSeg;
+      pts.push([cxp + hw*(-Math.cos(th)*rx - Math.sin(th)*tx),
+                cyp + hw*(-Math.cos(th)*ry - Math.sin(th)*ty)]); } }
+  const ccw = area2(pts) > 0;
+  if (cw === ccw) pts.reverse();
+  return pts;
+}
+
+// Recessed two-finger pinch grip: two curved finger wells pressed DOWN into the
+// lid top (toward the inside of the bin), curving toward each other like a
+// pinch. Nothing stands above the lid. Returns the openings to cut in the lid
+// top (`holes`) and the thin-walled cup solids forming the wells (`cups`).
+// `topZ` is the local Z of the surface the fingers enter; wells reach `depth`
+// below it. centreHX/centreHY bound the flat central area available.
 function pinchWells(centreHX, centreHY, topZ, depth, seg) {
-  const wseg = Math.max(28, seg * 4);
-  const tw = 1.6;          // cup wall thickness
-  const floorTh = 1.5;     // closed underside thickness
-  let ea = Math.min(8, centreHX * 0.30);     // pad half-length (along X, toward centre)
-  let eb = Math.min(5.5, centreHY * 0.5);    // pad half-width  (along Y)
-  ea = Math.max(3, ea); eb = Math.max(2.4, eb);
-  const gap = 6;                             // central web you pinch across
-  let cx0 = ea + gap / 2;                    // centre offset of each pad
-  const maxCx = centreHX - ea - tw - 1.2;
-  if (cx0 > maxCx) cx0 = Math.max(ea * 0.25, maxCx);
-  const zWell = topZ - depth;                // finger-well floor
-  const zCup  = zWell - floorTh;             // closed underside of the cup
+  const tw = 1.6, floorTh = 1.5;
+  const arcSeg = Math.max(12, seg * 2), capSeg = 6;
+  const hw = Math.max(2.6, Math.min(4, centreHY * 0.20));   // finger half-width
+  const Lh = Math.max(5, Math.min(centreHY * 0.56, 13));    // half finger length
+  const R  = Math.max(Lh + 3, 16);                          // gentle curvature
+  const alpha = Math.asin(Math.min(0.8, Lh / R));
+  const sag = R * (1 - Math.cos(alpha));                    // inward tip curl
+  const gap = Math.max(4, Math.min(7, centreHX * 0.18));    // central web
+  let xF = gap / 2 + sag + hw;
+  const maxXF = centreHX - hw - 0.8;
+  if (xF > maxXF) xF = Math.max(hw + 0.5, maxXF);
+  const Cx = xF - R;                                        // right-finger curvature centre
+  const zWell = topZ - depth, zCup = zWell - floorTh;
   const holes = [], cups = [];
-  for (const sgn of [-1, 1]) {
-    const cx = sgn * cx0, cy = 0;
-    // opening cut in the lid top — a hair larger than the pad so the cup wall
-    // embeds into the plate (no coincident wall) for a clean union.
-    holes.push(ellipseLoop(cx, cy, ea + 0.3, eb + 0.3, wseg, true));
+  for (const side of [1, -1]) {
+    const dir = side === 1 ? 0 : Math.PI;
+    const ccx = side === 1 ? Cx : -Cx;
+    holes.push(fingerLoop(ccx, 0, R, hw + 0.3, dir, alpha, true, arcSeg, capSeg));
+    const inTop  = fingerLoop(ccx, 0, R, hw,      dir, alpha, false, arcSeg, capSeg);
+    const outTop = fingerLoop(ccx, 0, R, hw + tw, dir, alpha, false, arcSeg, capSeg);
+    const inT = to3(inTop, topZ), inB = to3(inTop, zWell);
+    const outT = to3(outTop, topZ), outB = to3(outTop, zCup);
     const m = new Mesh();
-    const inT  = to3(ellipseLoop(cx, cy, ea,      eb,      wseg, false), topZ);
-    const inB  = to3(ellipseLoop(cx, cy, ea,      eb,      wseg, false), zWell);
-    const outT = to3(ellipseLoop(cx, cy, ea + tw, eb + tw, wseg, false), topZ);
-    const outB = to3(ellipseLoop(cx, cy, ea + tw, eb + tw, wseg, false), zCup);
-    ring(m, inT, outT, false);   // flat rim, flush with the lid top
-    ring(m, outT, outB, false);  // outer wall (embeds in plate, hangs below)
-    capFan(m, outB, false);      // closed cup bottom
-    ring(m, inB, inT, false);    // inner wall = the finger-well surface
-    capFan(m, inB, false);       // finger-well floor
+    ring(m, inT, outT, false);    // rim, flush with the lid top
+    ring(m, outT, outB, false);   // outer wall (embeds in plate, hangs below)
+    capLoop(m, outTop, zCup);     // closed cup bottom
+    ring(m, inB, inT, false);     // inner wall = the finger-well surface
+    capLoop(m, inTop, zWell);     // finger-well floor
     cups.push(m.solid());
   }
   return { holes, cups };
+}
+
+// A single straight-edge locking rib: a chamfered bar that drops into the bin's
+// stacking-lip recess and presses against the recess wall (the same wall the
+// stacking lip uses), registering the lid. `edge` is 'x+|x-|y+|y-' (which wall);
+// `Aperp` is the recess-wall coordinate; the rib spans +/-halfAlong along the
+// edge; `ld` is the recess depth. Built as one watertight prism.
+function lockRibSolid(edge, Aperp, halfAlong, ld) {
+  const ribDepth = 1.8;                         // inward reach (overlaps the plate)
+  const chamf = Math.min(0.8, ld * 0.5);        // bottom lead-in for easy insertion
+  const sgn = edge[1] === '+' ? 1 : -1;
+  const ax = edge[0];                           // perpendicular axis
+  const wallP = sgn * Aperp, chamP = sgn * (Aperp - chamf), innerP = sgn * (Aperp - ribDepth);
+  const cs = [[innerP, 0], [chamP, 0], [wallP, chamf], [wallP, ld], [innerP, ld]]; // (perp, z)
+  const xyz = (perp, along, z) => (ax === 'y' ? [along, perp, z] : [perp, along, z]);
+  const a0 = -halfAlong, a1 = halfAlong;
+  const m = new Mesh();
+  for (const t of triangulateWithHoles(cs, [])) {        // end caps
+    m.tri(xyz(t[0][0], a0, t[0][1]), xyz(t[1][0], a0, t[1][1]), xyz(t[2][0], a0, t[2][1]));
+    m.tri(xyz(t[0][0], a1, t[0][1]), xyz(t[1][0], a1, t[1][1]), xyz(t[2][0], a1, t[2][1]));
+  }
+  for (let i = 0; i < cs.length; i++) {                  // side walls
+    const p0 = cs[i], p1 = cs[(i + 1) % cs.length];
+    m.quad(xyz(p0[0], a0, p0[1]), xyz(p1[0], a0, p1[1]),
+           xyz(p1[0], a1, p1[1]), xyz(p0[0], a1, p0[1]));
+  }
+  return m.solid();
+}
+
+// Locking ribs on the four STRAIGHT edges only; the rounded corners are left
+// clear so the lid can move straight down/up without the corners binding.
+function makeLockRibs(L, ld) {
+  const cc = Math.max(OUTER_R + 2, 5);          // corner clearance (rib stops short of corners)
+  const ribs = [];
+  const hX = L.Ax - cc, hY = L.Ay - cc;
+  if (hX > 2) { ribs.push(lockRibSolid('y+', L.Ay, hX, ld)); ribs.push(lockRibSolid('y-', L.Ay, hX, ld)); }
+  if (hY > 2) { ribs.push(lockRibSolid('x+', L.Ax, hY, ld)); ribs.push(lockRibSolid('x-', L.Ax, hY, ld)); }
+  return ribs;
 }
 
 // How far (mm) the recessed two-finger grip reaches down into the bin.
@@ -620,6 +691,7 @@ export function buildLid(p, binMeta) {
       { hx: halfX,   hy: halfY,   z: flangeTopZ },
     ], halfX, seg, holes));
     parts.push(makeLipRingOnTop(halfX, halfY, flangeTopZ, seg)); // bin-width stacking lip
+    for (const rib of makeLockRibs(L, ld)) parts.push(rib);      // straight-edge locks
     lipTop = seatZ + flangeTopZ + LIP_H; height = flangeTopZ + LIP_H; inset = true;
 
   } else if (stackable) {
@@ -665,6 +737,7 @@ export function buildLid(p, binMeta) {
     } else {
       parts.push(platePrism(plateHX, plateHY, 0, ld, binMeta.halfX, seg));
     }
+    for (const rib of makeLockRibs(L, ld)) parts.push(rib);     // straight-edge locks
 
   } else {
     // Plain over-lid (no stacking lip on the bin): caps the rim with a skirt.
