@@ -461,6 +461,7 @@ export function buildBin(p) {
     halfX, halfY, r: OUTER_R,
     wallTop: total,
     total: lipOn ? total + LIP_H : total,    // full external height incl. lip
+    cavityFloorZ,                            // top of the interior floor (for lid grip depth)
     stackingLip: lipOn,
     vaseMode: !!p.vaseMode,
   };
@@ -493,18 +494,86 @@ function makeLipRingOnTop(hx, hy, baseZ, seg) {
   return m.solid();
 }
 
-// Raised rounded rib for a 2-finger pinch grip, centred, standing up from topZ.
-function makeHandle(hx, hy, topZ, seg) {
-  const hl = Math.min(Math.max(Math.min(hx, hy) * 0.8, 8), 28); // half length
-  const ht = 3;   // half thickness (6 mm)
-  const hh = 8;   // height above the surface
-  const r = Math.min(ht * 0.8, 1.5);
+// Ellipse outline of `seg` points. cw=false -> CCW (outer), cw=true -> CW (hole).
+function ellipseLoop(cx, cy, ax, by, seg, cw) {
+  const pts = [];
+  for (let s = 0; s < seg; s++) {
+    const a = (cw ? -1 : 1) * 2 * Math.PI * (s / seg);
+    pts.push([cx + ax * Math.cos(a), cy + by * Math.sin(a)]);
+  }
+  return pts;
+}
+
+// Vertical stack of concentric rounded-rect rings, capped top + bottom, with
+// optional elliptical *through* openings punched in both caps (for the pinch
+// wells). `levels` runs bottom -> top as [{hx,hy,z}, ...]; the radii may step
+// (so this builds both the flat inset plate and the stepped stackable body).
+// `holes` are CW ellipse loops; they pierce the body so a separate well-cup can
+// hang through. Watertight on its own.
+function ringStackSolid(levels, binHalfX, seg, holes) {
   const m = new Mesh();
-  const bot = to3(roundedRectLoop(hl, ht, r, seg), topZ - 0.6); // overlap to fuse
-  const top = to3(roundedRectLoop(hl, ht, r, seg), topZ + hh);
-  capFan(m, bot, false); ring(m, bot, top, false); capFan(m, top, true);
+  const loopOf = (L) =>
+    roundedRectLoop(L.hx, L.hy, Math.max(0.3, OUTER_R - (binHalfX - L.hx)), seg);
+  const lo = levels[0], hi = levels[levels.length - 1];
+  const cap = (rect, z) => {
+    if (holes && holes.length) {
+      for (const t of triangulateWithHoles(rect, holes))
+        m.tri([t[0][0], t[0][1], z], [t[1][0], t[1][1], z], [t[2][0], t[2][1], z]);
+    } else {
+      capFan(m, to3(rect, z), true);
+    }
+  };
+  cap(loopOf(lo), lo.z);                                   // bottom face
+  cap(loopOf(hi), hi.z);                                   // top face
+  for (let k = 0; k < levels.length - 1; k++)              // outer side rings
+    ring(m, to3(loopOf(levels[k]), levels[k].z), to3(loopOf(levels[k + 1]), levels[k + 1].z), false);
+  if (holes) for (const h of holes)                        // straight tunnel per well
+    ring(m, to3(h, lo.z), to3(h, hi.z), false);
   return m.solid();
 }
+
+// Recessed two-finger pinch grip: two opposing finger-shaped wells pressed DOWN
+// into the lid top (toward the inside of the bin). Nothing stands above the lid.
+// Returns the elliptical openings to cut in the lid top (`holes`, CW) and the
+// thin-walled cup solids that form the wells (`cups`). `topZ` is the local Z of
+// the surface the fingers enter; wells reach `depth` below it. centreHX/centreHY
+// bound the flat central area available between the two pads.
+function pinchWells(centreHX, centreHY, topZ, depth, seg) {
+  const wseg = Math.max(28, seg * 4);
+  const tw = 1.6;          // cup wall thickness
+  const floorTh = 1.5;     // closed underside thickness
+  let ea = Math.min(8, centreHX * 0.30);     // pad half-length (along X, toward centre)
+  let eb = Math.min(5.5, centreHY * 0.5);    // pad half-width  (along Y)
+  ea = Math.max(3, ea); eb = Math.max(2.4, eb);
+  const gap = 6;                             // central web you pinch across
+  let cx0 = ea + gap / 2;                    // centre offset of each pad
+  const maxCx = centreHX - ea - tw - 1.2;
+  if (cx0 > maxCx) cx0 = Math.max(ea * 0.25, maxCx);
+  const zWell = topZ - depth;                // finger-well floor
+  const zCup  = zWell - floorTh;             // closed underside of the cup
+  const holes = [], cups = [];
+  for (const sgn of [-1, 1]) {
+    const cx = sgn * cx0, cy = 0;
+    // opening cut in the lid top — a hair larger than the pad so the cup wall
+    // embeds into the plate (no coincident wall) for a clean union.
+    holes.push(ellipseLoop(cx, cy, ea + 0.3, eb + 0.3, wseg, true));
+    const m = new Mesh();
+    const inT  = to3(ellipseLoop(cx, cy, ea,      eb,      wseg, false), topZ);
+    const inB  = to3(ellipseLoop(cx, cy, ea,      eb,      wseg, false), zWell);
+    const outT = to3(ellipseLoop(cx, cy, ea + tw, eb + tw, wseg, false), topZ);
+    const outB = to3(ellipseLoop(cx, cy, ea + tw, eb + tw, wseg, false), zCup);
+    ring(m, inT, outT, false);   // flat rim, flush with the lid top
+    ring(m, outT, outB, false);  // outer wall (embeds in plate, hangs below)
+    capFan(m, outB, false);      // closed cup bottom
+    ring(m, inB, inT, false);    // inner wall = the finger-well surface
+    capFan(m, inB, false);       // finger-well floor
+    cups.push(m.solid());
+  }
+  return { holes, cups };
+}
+
+// How far (mm) the recessed two-finger grip reaches down into the bin.
+const PINCH_DEPTH = 15;   // 1.5 cm
 
 export function buildLid(p, binMeta) {
   const seg = p.cornerSegs ?? 8;
@@ -513,58 +582,126 @@ export function buildLid(p, binMeta) {
   const ld = Math.min(Math.max(lp.topThickness ?? 1.6, 0.8), 3.0);
   const pinch = !!lp.pinchHandle;
   const stackable = !!lp.stackable;
+  const floorZ = binMeta.cavityFloorZ ?? (BASE_H + 1.2);
   const parts = [];
   let seatZ, lipTop, height, inset = false;
 
-  if (stackable) {
-    // Capping over-lid with a stacking lip on top: presents a Gridfinity surface
-    // so another bin nests on a closed box.
-    const lidWall = lp.wall ?? 1.6, skirtH = lp.skirtHeight ?? 6;
+  // Depth the finger wells reach below the lid top (assembled), clamped so the
+  // cups never dive through the bin's interior floor.
+  const wellDepth = (topAssembledZ) =>
+    Math.max(4, Math.min(PINCH_DEPTH, topAssembledZ - floorZ - 2));
+
+  if (stackable && binMeta.lip) {
+    // STACKABLE = flush inset that drops INTO the lip recess (not a cap around
+    // the outside). A full-width flange sits flush on the rim and carries a
+    // Gridfinity stacking lip on top, so another bin nests. Widest part = bin
+    // width; the locating plug fits inside.
+    const L = binMeta.lip;
     const { halfX, halfY } = binMeta;
-    const pocketHX = halfX + clr, pocketHY = halfY + clr, pocketR = OUTER_R + clr;
-    const outerHX = pocketHX + lidWall, outerHY = pocketHY + lidWall, outerR = pocketR + lidWall;
-    const plateTopZ = skirtH + ld;
-    const m = new Mesh();
-    const outerBot = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), 0);
-    const outerTop = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), plateTopZ);
-    const pocketBot = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), 0);
-    const pocketCeil = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), skirtH);
-    capFan(m, outerTop, true);
-    ring(m, outerBot, outerTop, false);
-    ring(m, outerBot, pocketBot, false);
-    ring(m, pocketBot, pocketCeil, false);
-    capFan(m, pocketCeil, false);
-    parts.push(m.solid());
-    parts.push(makeLipRingOnTop(outerHX, outerHY, plateTopZ, seg)); // stacking surface
-    seatZ = binMeta.wallTop - skirtH; lipTop = plateTopZ + LIP_H; height = lipTop;
-    if (pinch) parts.push(makeHandle(outerHX, outerHY, plateTopZ, seg));
+    const plugHX = Math.max(1, L.Ax - clr), plugHY = Math.max(1, L.Ay - clr);
+    const flangeTh = Math.max(ld, 1.2);
+    const flangeTopZ = ld + flangeTh;        // local; = rim level + flange
+    seatZ = L.ledgeZ;                        // plug bottom rests on the lip ledge
+    const topAssembled = seatZ + flangeTopZ; // socket floor in assembled space
+
+    let holes = null;
+    if (pinch) {
+      const reach = Math.min(plugHX, halfX - (LIP_TOP_CHAMFER + 1.0) - 1.5);
+      const w = pinchWells(reach, Math.min(plugHY, halfY - (LIP_TOP_CHAMFER + 1.0) - 1.5),
+                           flangeTopZ, wellDepth(topAssembled), seg);
+      holes = w.holes;
+      for (const c of w.cups) parts.push(c);
+    }
+    // stepped body: plug -> flush flange (full bin width), wells pierce both caps
+    parts.push(ringStackSolid([
+      { hx: plugHX,  hy: plugHY,  z: 0 },
+      { hx: plugHX,  hy: plugHY,  z: ld },
+      { hx: halfX,   hy: halfY,   z: ld },
+      { hx: halfX,   hy: halfY,   z: flangeTopZ },
+    ], halfX, seg, holes));
+    parts.push(makeLipRingOnTop(halfX, halfY, flangeTopZ, seg)); // bin-width stacking lip
+    lipTop = seatZ + flangeTopZ + LIP_H; height = flangeTopZ + LIP_H; inset = true;
+
+  } else if (stackable) {
+    // Stackable requested but the bin has no lip: flush cap on the rim with a
+    // locating plug inside, plus a bin-width stacking lip on top.
+    const { halfX, halfY } = binMeta;
+    const plugHX = Math.max(1, halfX - (lp.wall ?? 1.6) - clr);
+    const plugHY = Math.max(1, halfY - (lp.wall ?? 1.6) - clr);
+    const plugDrop = 4;                      // how far the plug reaches into the bin
+    const flangeTh = Math.max(ld, 1.2);
+    const flangeTopZ = plugDrop + flangeTh;
+    seatZ = binMeta.wallTop - plugDrop;
+    const topAssembled = seatZ + flangeTopZ;
+
+    let holes = null;
+    if (pinch) {
+      const w = pinchWells(plugHX, plugHY, flangeTopZ, wellDepth(topAssembled), seg);
+      holes = w.holes;
+      for (const c of w.cups) parts.push(c);
+    }
+    parts.push(ringStackSolid([
+      { hx: plugHX, hy: plugHY, z: 0 },
+      { hx: plugHX, hy: plugHY, z: plugDrop },
+      { hx: halfX,  hy: halfY,  z: plugDrop },
+      { hx: halfX,  hy: halfY,  z: flangeTopZ },
+    ], halfX, seg, holes));
+    parts.push(makeLipRingOnTop(halfX, halfY, flangeTopZ, seg));
+    lipTop = seatZ + flangeTopZ + LIP_H; height = flangeTopZ + LIP_H; inset = true;
+
   } else if (binMeta.lip) {
     // Flush inset lid: drops into the lip recess, top flush with the rim.
     const L = binMeta.lip;
     const plateHX = Math.max(1, L.Ax - clr), plateHY = Math.max(1, L.Ay - clr);
-    parts.push(platePrism(plateHX, plateHY, 0, ld, binMeta.halfX, seg));
     seatZ = L.ledgeZ; lipTop = L.lipTop; height = ld; inset = true;
-    if (pinch) parts.push(makeHandle(plateHX, plateHY, ld, seg));
+    const topAssembled = seatZ + ld;
+    if (pinch) {
+      const w = pinchWells(plateHX, plateHY, ld, wellDepth(topAssembled), seg);
+      for (const c of w.cups) parts.push(c);
+      parts.push(ringStackSolid([
+        { hx: plateHX, hy: plateHY, z: 0 },
+        { hx: plateHX, hy: plateHY, z: ld },
+      ], binMeta.halfX, seg, w.holes));
+    } else {
+      parts.push(platePrism(plateHX, plateHY, 0, ld, binMeta.halfX, seg));
+    }
+
   } else {
-    // Plain over-lid (no stacking lip on the bin).
+    // Plain over-lid (no stacking lip on the bin): caps the rim with a skirt.
     const lidWall = lp.wall ?? 1.6, skirtH = lp.skirtHeight ?? 6;
     const { halfX, halfY } = binMeta;
     const pocketHX = halfX + clr, pocketHY = halfY + clr, pocketR = OUTER_R + clr;
     const outerHX = pocketHX + lidWall, outerHY = pocketHY + lidWall, outerR = pocketR + lidWall;
     const H = skirtH + ld;
-    const m = new Mesh();
-    const outerBot = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), 0);
-    const outerTop = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), H);
-    const pocketBot = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), 0);
-    const pocketCeil = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), skirtH);
-    capFan(m, outerTop, true);
-    ring(m, outerBot, outerTop, false);
-    ring(m, outerBot, pocketBot, false);
-    ring(m, pocketBot, pocketCeil, false);
-    capFan(m, pocketCeil, false);
-    parts.push(m.solid());
     seatZ = binMeta.wallTop - skirtH; lipTop = binMeta.wallTop; height = H;
-    if (pinch) parts.push(makeHandle(outerHX, outerHY, H, seg));
+    const topAssembled = seatZ + H;
+
+    let holes = null;
+    if (pinch) {
+      const w = pinchWells(pocketHX, pocketHY, H, wellDepth(topAssembled), seg);
+      holes = w.holes;
+      for (const c of w.cups) parts.push(c);
+    }
+    const m = new Mesh();
+    const outerBot  = to3(roundedRectLoop(outerHX, outerHY, outerR, seg), 0);
+    const outerTopL = roundedRectLoop(outerHX, outerHY, outerR, seg);
+    const pocketBot = to3(roundedRectLoop(pocketHX, pocketHY, pocketR, seg), 0);
+    const pocketCeilL = roundedRectLoop(pocketHX, pocketHY, pocketR, seg);
+    // top face (+ wells punched through the solid top slab)
+    if (holes) {
+      for (const t of triangulateWithHoles(outerTopL, holes))
+        m.tri([t[0][0],t[0][1],H], [t[1][0],t[1][1],H], [t[2][0],t[2][1],H]);
+      for (const t of triangulateWithHoles(pocketCeilL, holes))
+        m.tri([t[0][0],t[0][1],skirtH], [t[1][0],t[1][1],skirtH], [t[2][0],t[2][1],skirtH]);
+      for (const h of holes) ring(m, to3(h, skirtH), to3(h, H), false); // tunnels in the slab
+    } else {
+      capFan(m, to3(outerTopL, H), true);
+      capFan(m, to3(pocketCeilL, skirtH), false);
+    }
+    ring(m, outerBot, to3(outerTopL, H), false);
+    ring(m, outerBot, pocketBot, false);
+    ring(m, pocketBot, to3(pocketCeilL, skirtH), false);
+    parts.push(m.solid());
   }
 
   return { solid: mergeSolids(parts), height, seatZ, lipTop, inset, stackable };
