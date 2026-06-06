@@ -179,7 +179,7 @@
   <header>
     <div class="brand"><b>GRID</b>FORGE</div>
     <div class="tagline">parametric bin generator</div>
-    <div class="ver">build 4 · recessed pinch grip + inset stackable lid</div>
+    <div class="ver">build 5 · locking inset lid (straight-edge lock) + curved pinch grip</div>
     <div class="spec">grid <b>42mm</b> · unit <b>7mm</b> · base <b>4.75mm</b></div>
   </header>
 
@@ -287,7 +287,7 @@
         <div class="toggle"><span>Stackable lid (inset + lip on top)</span>
           <label class="switch"><input id="lidStackable" type="checkbox"><span class="slider"></span></label>
         </div>
-        <p class="hint"><b>Pinch handle</b> presses two finger-shaped wells <i>down into</i> the lid (~15&nbsp;mm into the bin) — nothing sticks up above the top; you pinch the web between them to lift. <b>Stackable</b> keeps the lid a flush inset (widest part = bin width, dropping inside the recess, not wrapping around) and adds a Gridfinity stacking lip on top so another bin nests. With both on, the finger wells sit in the stacking socket and still work.</p>
+        <p class="hint"><b>Pinch grip</b> presses two curved finger wells <i>down into</i> the lid (~15&nbsp;mm into the bin); the wells curve toward each other like a pinching thumb and finger, and nothing sticks up above the top. <b>Stackable</b> keeps the lid a flush inset (widest part = bin width, not wrapping around) and adds a Gridfinity stacking lip on top so another bin nests. Either way the lid <b>locks into the bin’s stacking-lip recess</b> with ribs on the four straight edges only — the rounded corners are left clear so the lid drops straight in and lifts straight out without the corners binding.</p>
         <div class="toggle"><span>Show lid in view</span>
           <label class="switch"><input id="showLid" type="checkbox" checked><span class="slider"></span></label>
         </div>
@@ -1167,36 +1167,107 @@ function ringStackSolid(levels, binHalfX, seg, holes) {
   return m.solid();
 }
 
-// Recessed two-finger pinch grip: two opposing finger-shaped wells pressed DOWN
-// into the lid top (toward the inside of the bin). Nothing stands above the lid.
+// Triangulate a (possibly concave) 2D loop as a horizontal cap at height z.
+function capLoop(mesh, loop2d, z) {
+  for (const t of triangulateWithHoles(loop2d, []))
+    mesh.tri([t[0][0], t[0][1], z], [t[1][0], t[1][1], z], [t[2][0], t[2][1], z]);
+}
+
+// Curved "finger" outline: a capsule swept along a circular arc, with rounded
+// ends, so the two pinch wells curve toward each other like a pinching thumb +
+// finger. `cw` picks the winding.
+function fingerLoop(Cx, Cy, R, hw, dir, alpha, cw, arcSeg, capSeg) {
+  arcSeg = arcSeg ?? 14; capSeg = capSeg ?? 6;
+  const pts = [];
+  const at = (rad, phi) => [Cx + rad * Math.cos(phi), Cy + rad * Math.sin(phi)];
+  for (let i = 0; i <= arcSeg; i++)
+    pts.push(at(R + hw, dir - alpha + 2 * alpha * i / arcSeg));
+  { const phe = dir + alpha, cxp = Cx + R*Math.cos(phe), cyp = Cy + R*Math.sin(phe);
+    const rx = Math.cos(phe), ry = Math.sin(phe), tx = -Math.sin(phe), ty = Math.cos(phe);
+    for (let j = 1; j <= capSeg - 1; j++) { const th = Math.PI * j / capSeg;
+      pts.push([cxp + hw*(Math.cos(th)*rx + Math.sin(th)*tx),
+                cyp + hw*(Math.cos(th)*ry + Math.sin(th)*ty)]); } }
+  for (let i = 0; i <= arcSeg; i++)
+    pts.push(at(R - hw, dir + alpha - 2 * alpha * i / arcSeg));
+  { const phs = dir - alpha, cxp = Cx + R*Math.cos(phs), cyp = Cy + R*Math.sin(phs);
+    const rx = Math.cos(phs), ry = Math.sin(phs), tx = -Math.sin(phs), ty = Math.cos(phs);
+    for (let j = 1; j <= capSeg - 1; j++) { const th = Math.PI * j / capSeg;
+      pts.push([cxp + hw*(-Math.cos(th)*rx - Math.sin(th)*tx),
+                cyp + hw*(-Math.cos(th)*ry - Math.sin(th)*ty)]); } }
+  const ccw = area2(pts) > 0;
+  if (cw === ccw) pts.reverse();
+  return pts;
+}
+
+// Recessed two-finger pinch grip: two curved finger wells pressed DOWN into the
+// lid top, curving toward each other like a pinch. Nothing stands above the lid.
 function pinchWells(centreHX, centreHY, topZ, depth, seg) {
-  const wseg = Math.max(28, seg * 4);
   const tw = 1.6, floorTh = 1.5;
-  let ea = Math.min(8, centreHX * 0.30);
-  let eb = Math.min(5.5, centreHY * 0.5);
-  ea = Math.max(3, ea); eb = Math.max(2.4, eb);
-  const gap = 6;
-  let cx0 = ea + gap / 2;
-  const maxCx = centreHX - ea - tw - 1.2;
-  if (cx0 > maxCx) cx0 = Math.max(ea * 0.25, maxCx);
+  const arcSeg = Math.max(12, seg * 2), capSeg = 6;
+  const hw = Math.max(2.6, Math.min(4, centreHY * 0.20));
+  const Lh = Math.max(5, Math.min(centreHY * 0.56, 13));
+  const R  = Math.max(Lh + 3, 16);
+  const alpha = Math.asin(Math.min(0.8, Lh / R));
+  const sag = R * (1 - Math.cos(alpha));
+  const gap = Math.max(4, Math.min(7, centreHX * 0.18));
+  let xF = gap / 2 + sag + hw;
+  const maxXF = centreHX - hw - 0.8;
+  if (xF > maxXF) xF = Math.max(hw + 0.5, maxXF);
+  const Cx = xF - R;
   const zWell = topZ - depth, zCup = zWell - floorTh;
   const holes = [], cups = [];
-  for (const sgn of [-1, 1]) {
-    const cx = sgn * cx0, cy = 0;
-    holes.push(ellipseLoop(cx, cy, ea + 0.3, eb + 0.3, wseg, true));
+  for (const side of [1, -1]) {
+    const dir = side === 1 ? 0 : Math.PI;
+    const ccx = side === 1 ? Cx : -Cx;
+    holes.push(fingerLoop(ccx, 0, R, hw + 0.3, dir, alpha, true, arcSeg, capSeg));
+    const inTop  = fingerLoop(ccx, 0, R, hw,      dir, alpha, false, arcSeg, capSeg);
+    const outTop = fingerLoop(ccx, 0, R, hw + tw, dir, alpha, false, arcSeg, capSeg);
+    const inT = to3(inTop, topZ), inB = to3(inTop, zWell);
+    const outT = to3(outTop, topZ), outB = to3(outTop, zCup);
     const m = new Mesh();
-    const inT  = to3(ellipseLoop(cx, cy, ea,      eb,      wseg, false), topZ);
-    const inB  = to3(ellipseLoop(cx, cy, ea,      eb,      wseg, false), zWell);
-    const outT = to3(ellipseLoop(cx, cy, ea + tw, eb + tw, wseg, false), topZ);
-    const outB = to3(ellipseLoop(cx, cy, ea + tw, eb + tw, wseg, false), zCup);
     ring(m, inT, outT, false);
     ring(m, outT, outB, false);
-    capFan(m, outB, false);
+    capLoop(m, outTop, zCup);
     ring(m, inB, inT, false);
-    capFan(m, inB, false);
+    capLoop(m, inTop, zWell);
     cups.push(m.solid());
   }
   return { holes, cups };
+}
+
+// A single straight-edge locking rib: a chamfered bar that drops into the bin's
+// stacking-lip recess and presses against the recess wall (the same wall the
+// stacking lip uses). One watertight prism.
+function lockRibSolid(edge, Aperp, halfAlong, ld) {
+  const ribDepth = 1.8, chamf = Math.min(0.8, ld * 0.5);
+  const sgn = edge[1] === '+' ? 1 : -1;
+  const ax = edge[0];
+  const wallP = sgn * Aperp, chamP = sgn * (Aperp - chamf), innerP = sgn * (Aperp - ribDepth);
+  const cs = [[innerP, 0], [chamP, 0], [wallP, chamf], [wallP, ld], [innerP, ld]];
+  const xyz = (perp, along, z) => (ax === 'y' ? [along, perp, z] : [perp, along, z]);
+  const a0 = -halfAlong, a1 = halfAlong;
+  const m = new Mesh();
+  for (const t of triangulateWithHoles(cs, [])) {
+    m.tri(xyz(t[0][0], a0, t[0][1]), xyz(t[1][0], a0, t[1][1]), xyz(t[2][0], a0, t[2][1]));
+    m.tri(xyz(t[0][0], a1, t[0][1]), xyz(t[1][0], a1, t[1][1]), xyz(t[2][0], a1, t[2][1]));
+  }
+  for (let i = 0; i < cs.length; i++) {
+    const p0 = cs[i], p1 = cs[(i + 1) % cs.length];
+    m.quad(xyz(p0[0], a0, p0[1]), xyz(p1[0], a0, p1[1]),
+           xyz(p1[0], a1, p1[1]), xyz(p0[0], a1, p0[1]));
+  }
+  return m.solid();
+}
+
+// Locking ribs on the four STRAIGHT edges only; rounded corners left clear so
+// the lid can move straight down/up without the corners binding.
+function makeLockRibs(L, ld) {
+  const cc = Math.max(OUTER_R + 2, 5);
+  const ribs = [];
+  const hX = L.Ax - cc, hY = L.Ay - cc;
+  if (hX > 2) { ribs.push(lockRibSolid('y+', L.Ay, hX, ld)); ribs.push(lockRibSolid('y-', L.Ay, hX, ld)); }
+  if (hY > 2) { ribs.push(lockRibSolid('x+', L.Ax, hY, ld)); ribs.push(lockRibSolid('x-', L.Ax, hY, ld)); }
+  return ribs;
 }
 
 // How far (mm) the recessed two-finger grip reaches down into the bin.
@@ -1244,6 +1315,7 @@ function buildLid(p, binMeta) {
       { hx: halfX,   hy: halfY,   z: flangeTopZ },
     ], halfX, seg, holes));
     parts.push(makeLipRingOnTop(halfX, halfY, flangeTopZ, seg));
+    for (const rib of makeLockRibs(L, ld)) parts.push(rib);      // straight-edge locks
     lipTop = seatZ + flangeTopZ + LIP_H; height = flangeTopZ + LIP_H; inset = true;
 
   } else if (stackable) {
@@ -1289,6 +1361,7 @@ function buildLid(p, binMeta) {
     } else {
       parts.push(platePrism(plateHX, plateHY, 0, ld, binMeta.halfX, seg));
     }
+    for (const rib of makeLockRibs(L, ld)) parts.push(rib);     // straight-edge locks
 
   } else {
     // Plain over-lid (no stacking lip on the bin): caps the rim with a skirt.

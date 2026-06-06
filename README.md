@@ -26,13 +26,17 @@ top — it isn't part of the spiral, matching how vase-mode Gridfinity bins are 
 
 ### Lid options
 
-- **Pinch grip** — two finger-shaped wells recessed *down into* the lid (about 15 mm into the
-  bin). Nothing protrudes above the lid top; you press two fingers into the wells and pinch the
-  web between them to lift the lid out.
+- **Pinch grip** — two curved finger wells recessed *down into* the lid (about 15 mm into the
+  bin). The wells curve toward each other like a pinching thumb and finger; nothing protrudes
+  above the lid top. You press a finger into each well and pinch the web between them to lift.
+- **Lid lock** — every lid for a bin with a stacking lip locks into that lip's recess (the same
+  wall the stacking mechanism uses) with ribs on the four **straight edges only**. The rounded
+  **corners are left clear**, so the lid moves straight down to seat and straight up to release
+  without the corners binding against the lip.
 - **Stackable lid** — stays a flush inset: it drops into the lip recess (the widest part equals
-  the bin width and sits flush, rather than wrapping around the outside) and carries a Gridfinity
-  stacking lip on top, so another bin nests onto the closed box. Combining it with the pinch grip
-  carves the finger wells into the socket floor, so they remain usable through the stacking lip.
+  the bin width, rather than wrapping around the outside) and carries a Gridfinity stacking lip
+  on top, so another bin nests onto the closed box. Combining it with the pinch grip carves the
+  finger wells into the socket floor, so they remain usable through the stacking lip.
 
 ## Running it
 
