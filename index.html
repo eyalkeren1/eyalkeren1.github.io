@@ -203,6 +203,9 @@
         </div>
         <div class="row"><label>Height units (×7mm)</label><span class="val" data-out="heightUnits"></span></div>
         <input id="heightUnits" type="range" min="2" max="20" step="1" value="6">
+        <div class="toggle" style="margin-top:12px"><span>Stacking lip (stackable, +4.4mm)</span>
+          <label class="switch"><input id="stackingLip" type="checkbox" checked><span class="slider"></span></label>
+        </div>
       </div>
 
       <div class="group">
@@ -244,11 +247,11 @@
         <p class="ghead feat"><span class="num">05</span> Reinforcement indents <span class="feature-tag">STRENGTH</span></p>
         <div class="row"><label>Count along height</label><span class="val" data-out="indentCount"></span></div>
         <input id="indentCount" type="range" min="0" max="5" step="1" value="1">
+        <div class="row"><label>Radius (roundness)</label><span class="val"><span data-out="indentRadius"></span><span class="u">mm</span></span></div>
+        <input id="indentRadius" type="range" min="0.4" max="4" step="0.1" value="1.5">
         <div class="row"><label>Depth</label><span class="val"><span data-out="indentDepth"></span><span class="u">mm</span></span></div>
-        <input id="indentDepth" type="range" min="0.2" max="1.5" step="0.1" value="0.6">
-        <div class="row"><label>Width (band)</label><span class="val"><span data-out="indentWidth"></span><span class="u">mm</span></span></div>
-        <input id="indentWidth" type="range" min="1" max="6" step="0.5" value="2.5">
-        <p class="hint">Recessed grooves wrap the outer wall to stiffen tall, thin-walled bins. They stay inside the footprint so bins still sit flush against neighbours.</p>
+        <input id="indentDepth" type="range" min="0.2" max="2" step="0.1" value="0.8">
+        <p class="hint">Rounded grooves wrap the outer wall to stiffen tall, thin-walled bins. Radius sets how round the channel is; depth is clamped to just under the wall thickness so it never breaks through.</p>
       </div>
 
       <div class="group">
@@ -268,8 +271,9 @@
             <input id="lidSkirt" type="range" min="3" max="12" step="0.5" value="6">
           </div>
         </div>
-        <div class="row"><label>Top thickness</label><span class="val"><span data-out="lidTop"></span><span class="u">mm</span></span></div>
+        <div class="row"><label>Top / lid thickness</label><span class="val"><span data-out="lidTop"></span><span class="u">mm</span></span></div>
         <input id="lidTop" type="range" min="0.8" max="3" step="0.1" value="1.6">
+        <p class="hint">With the stacking lip on, the lid is a <b>flush inset</b> — it drops into the lip recess and its top sits level with the bin rim (uses clearance + lid thickness; skirt/wall apply only to the over-lid used when the lip is off).</p>
         <div class="toggle"><span>Show lid in view</span>
           <label class="switch"><input id="showLid" type="checkbox" checked><span class="slider"></span></label>
         </div>

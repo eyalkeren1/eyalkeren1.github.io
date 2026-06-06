@@ -2,16 +2,19 @@
 
 A browser tool for designing [Gridfinity](https://gridfinity.xyz)-compatible storage
 bins with a live 3D preview and one-click STL export. Beyond the usual parameters it
-adds two requested features:
+adds these requested features:
 
-- **Fitted lid** — a matching over-lid sized to the bin you designed (adjustable
-  clearance, wall, skirt depth, and top thickness), exportable as its own STL.
-- **Reinforcement indents** — one or more recessed grooves wrapping the outer wall
-  along the height to stiffen tall, thin-walled bins. They stay inside the footprint
-  so bins still sit flush against their neighbours on a baseplate.
+- **Stacking lip** — a toggleable Gridfinity stacking lip on the top (the canonical
+  4.4 mm profile with a 45° outer chamfer), so bins stack and nest like standard bins.
+- **Flush inset lid** — when the stacking lip is on, the matching lid is an inset that
+  drops into the lip recess and sits flush with the bin's top rim (rather than wrapping
+  the outside). With the lip off, it falls back to an over-lid that caps the outside.
+- **Rounded reinforcement indents** — one or more circular-arc grooves wrapping the outer
+  wall to stiffen tall, thin bins, with a **radius** control for how round the channel is
+  and a depth control (clamped to just under the wall so it never breaks through).
 
 Plus the standard controls: grid footprint (X×Y), height in 7 mm units, wall and floor
-thickness, row/column compartment dividers, and magnet/screw mounting holes in the feet.
+thickness, row/column compartment dividers, and magnet/screw holes in the feet.
 
 ## Running it
 
@@ -61,13 +64,14 @@ development; the generated bin, lid, dividers and feet are each individually wat
 
 ## Known simplifications
 
-- The top edge is a **flat rim**, not the true Gridfinity stacking lip — bins nest loosely
-  via the rim and the lid fits regardless, but they won't click-stack like official bins.
+- The stacking lip uses the canonical 4.4 mm height and a clean chamfered profile; the
+  micro-fillets differ slightly from the official Fusion model (a known difference shared
+  by most open-source generators) but bins still stack.
 - No scoop ramp or label tab yet.
 - Dividers are plain square-cornered walls.
 - Mounting holes are a single blind cylinder per corner (magnet *or* screw via the
   diameter/depth controls), not the concentric magnet-plus-screw counterbore.
-- The lid is an **over-lid** (shoebox style) that hugs the outer walls, independent of any
-  stacking lip.
+- The inset lid rests on an internal ledge in the lip; the small ledge underside is a
+  short bridgeable overhang when printed.
 
 These are the natural next steps if you want to extend it.
